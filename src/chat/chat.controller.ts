@@ -27,6 +27,12 @@ export class ChatController {
     return this.chat.getMessages(id);
   }
 
+  /** GET /chat/:id/tools — cosa ha eseguito l'agente, con esito e durata. */
+  @Get(':id/tools')
+  tools(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.chat.getToolCalls(id);
+  }
+
   /**
    * GET /chat/:id/stats — token consumati, risparmio della cache, costo stimato.
    * Serve a rendere visibile l'economia della conversazione: senza numeri,

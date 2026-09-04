@@ -2,7 +2,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { loadMemoryConfig, type MemoryConfig } from '../config/memory.config.js';
-import { LlmService } from '../llm/llm.service.js';
+import { ToolCallsRepository } from '../tools/tool-calls.repository.js';
+import { AgentService } from './agent.service.js';
 import type { SearchHit } from '../rag/rag.repository.js';
 import { RagService } from '../rag/rag.service.js';
 import {
@@ -26,6 +27,16 @@ export interface ChatResult {
     /** true se in testa alla richiesta c'era un riassunto della parte vecchia. */
     usedSummary: boolean;
   };
+  /** Strumenti eseguiti in questo turno, con esito e durata. */
+  toolCalls: Array<{
+    name: string;
+    input: unknown;
+    isError: boolean;
+    durationMs: number;
+    output: string;
+  }>;
+  /** Quanti giri di modello sono serviti (1 = nessuno strumento usato). */
+  iterations: number;
   /** Frammenti recuperati dal RAG: rende verificabile su cosa si è basata la risposta. */
   retrieved: Array<{
     path: string;
@@ -44,9 +55,10 @@ export class ChatService {
 
   constructor(
     private readonly messages: MessagesRepository,
-    private readonly llm: LlmService,
     private readonly summaries: SummaryService,
     private readonly rag: RagService,
+    private readonly agent: AgentService,
+    private readonly toolCalls: ToolCallsRepository,
     config: ConfigService,
   ) {
     this.memory = loadMemoryConfig(config);
@@ -97,7 +109,9 @@ export class ChatService {
       recent,
       hits,
     );
-    const reply = await this.llm.complete(
+    // Il loop dell'agente: può concludersi al primo giro (nessuno strumento)
+    // oppure eseguire tool e richiamare il modello finché non ha una risposta.
+    const reply = await this.agent.run(
       messages,
       // Con il RAG attivo serve un breakpoint ESPLICITO invece del caching
       // automatico: il prompt finisce con i frammenti recuperati, che cambiano
@@ -118,11 +132,16 @@ export class ChatService {
     });
     await this.messages.touchConversation(conversationId);
 
+    // Registro delle esecuzioni: un agente che esegue comandi senza lasciare
+    // traccia di cosa ha eseguito non è controllabile.
+    await this.toolCalls.record(conversationId, reply.executions);
+
     this.logger.log(
       `conversazione ${conversationId} · ${recent.length} msg` +
         `${memory.summary ? ' + riassunto' : ''} · ` +
         `${reply.inputTokens} token pieni / ${reply.cacheReadTokens} da cache / ` +
-        `${reply.outputTokens} out`,
+        `${reply.outputTokens} out · ${reply.iterations} giri · ` +
+        `${reply.executions.length} strumenti`,
     );
 
     // 7. Riassumiamo se serve, SENZA far aspettare l'utente.
@@ -148,6 +167,14 @@ export class ChatService {
         historyMessages: recent.length,
         usedSummary: memory.summary !== null,
       },
+      iterations: reply.iterations,
+      toolCalls: reply.executions.map((execution) => ({
+        name: execution.name,
+        input: execution.input,
+        isError: execution.result.isError,
+        durationMs: execution.durationMs,
+        output: execution.result.content.slice(0, 500),
+      })),
       retrieved: hits.map((hit) => ({
         path: hit.path,
         lines:
@@ -168,6 +195,12 @@ export class ChatService {
   async getMessages(conversationId: string): Promise<StoredMessage[]> {
     await this.assertExists(conversationId);
     return this.messages.listMessages(conversationId);
+  }
+
+  /** Registro delle esecuzioni degli strumenti per una conversazione. */
+  async getToolCalls(conversationId: string) {
+    await this.assertExists(conversationId);
+    return this.toolCalls.listByConversation(conversationId);
   }
 
   /** Contabilità della conversazione: token, cache, costo stimato. */

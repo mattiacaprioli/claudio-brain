@@ -88,6 +88,26 @@ export interface LlmReply {
   cacheCreationTokens: number;
 }
 
+/**
+ * Un turno del modello, con tutto ciò che serve al loop dell'agente.
+ *
+ * `content` sono i blocchi GREZZI, e vanno rimandati indietro **invariati**
+ * al turno successivo: contengono i blocchi `thinking` e `tool_use`, che il
+ * modello si aspetta di ritrovare. Ricostruirli dal testo li perderebbe.
+ */
+export interface LlmTurn {
+  content: Anthropic.ContentBlock[];
+  stopReason: string | null;
+  /** Solo i blocchi di testo, concatenati: comodo quando non servono i tool. */
+  text: string;
+  toolUses: Anthropic.ToolUseBlock[];
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+}
+
 export interface CompleteOptions {
   /** Sovrascrive il system prompt (il riassuntore ne usa uno suo). */
   system?: string;
@@ -107,6 +127,14 @@ export interface CompleteOptions {
    * sovrapprezzo di scrittura (1.25x) su byte che non verranno mai riletti.
    */
   cacheUpToIndex?: number;
+  /**
+   * Strumenti esposti al modello.
+   *
+   * Attenzione: i tool vengono resi in testa al prompt, PRIMA del system
+   * prompt. Cambiarli (aggiungerne, rimuoverne, riordinarli) invalida la
+   * cache di tutto il resto — per questo ToolsService li ordina per nome.
+   */
+  tools?: Anthropic.Tool[];
 }
 
 /**
@@ -143,10 +171,17 @@ export class LlmService {
     this.maxTokens = Number(config.get<string>('ANTHROPIC_MAX_TOKENS') ?? 16000);
   }
 
-  async complete(
+  /**
+   * Un turno del modello, con i blocchi grezzi e lo stop_reason.
+   *
+   * È la primitiva su cui gira il loop dell'agente: serve sapere *perché* il
+   * modello si è fermato (ha finito? vuole un tool?) e quali blocchi
+   * rimandare indietro invariati.
+   */
+  async converse(
     messages: Anthropic.MessageParam[],
     options: CompleteOptions = {},
-  ): Promise<LlmReply> {
+  ): Promise<LlmTurn> {
     const explicitBreakpoint = options.cacheUpToIndex !== undefined;
     const preparedMessages = explicitBreakpoint
       ? withCacheBreakpoint(messages, options.cacheUpToIndex!)
@@ -204,6 +239,12 @@ export class LlmService {
         // per rotta invece di variare per richiesta, perché cambiarlo
         // invalida la cache dei messaggi.
         ...reasoning,
+
+        // I tool si passano solo se ce ne sono: un array vuoto è un errore di
+        // validazione, non un "nessuno strumento".
+        ...(options.tools && options.tools.length > 0
+          ? { tools: options.tools }
+          : {}),
       });
 
       // Un rifiuto per policy NON è un'eccezione: arriva come HTTP 200 con
@@ -228,7 +269,12 @@ export class LlmService {
       }
 
       return {
+        content: response.content,
+        stopReason: response.stop_reason,
         text,
+        toolUses: response.content.filter(
+          (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+        ),
         model: response.model,
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,
@@ -256,5 +302,26 @@ export class LlmService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Variante "una domanda, una risposta di testo", senza strumenti.
+   *
+   * La usa il riassuntore: un compito a turno singolo che non ha bisogno di
+   * sapere nulla di blocchi e stop_reason.
+   */
+  async complete(
+    messages: Anthropic.MessageParam[],
+    options: CompleteOptions = {},
+  ): Promise<LlmReply> {
+    const turn = await this.converse(messages, options);
+    return {
+      text: turn.text,
+      model: turn.model,
+      inputTokens: turn.inputTokens,
+      outputTokens: turn.outputTokens,
+      cacheReadTokens: turn.cacheReadTokens,
+      cacheCreationTokens: turn.cacheCreationTokens,
+    };
   }
 }

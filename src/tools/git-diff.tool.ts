@@ -70,8 +70,7 @@ export class GitDiffTool implements AgentTool {
       return { content: (error as Error).message, isError: true };
     }
 
-    const args = this.buildArgs(input);
-    const result = await safeExec('git', args, {
+    const result = await safeExec('git', this.buildArgs(input), {
       cwd: this.repoRoot,
       timeoutMs: 10_000,
     });
@@ -107,7 +106,24 @@ export class GitDiffTool implements AgentTool {
       return { content: spiegazione[input.mode ?? 'unstaged'], isError: false };
     }
 
-    return { content: truncateOutput(result.stdout), isError: false };
+    // IL RIEPILOGO PRIMA DEL DETTAGLIO.
+    //
+    // Un diff reale supera facilmente il tetto di troncamento (quello della
+    // Fase 3 era di 19.000 caratteri contro un tetto di 6.000). Restituire
+    // solo il patch tagliato significa che il modello non sa nemmeno QUALI
+    // file sono stati toccati oltre il punto di taglio: ha risposto
+    // "potrebbero esserci altre modifiche che non vedo", che è onesto ma
+    // inutile.
+    //
+    // Con `--stat` in testa, l'elenco completo dei file arriva sempre (costa
+    // una riga per file) e il troncamento colpisce solo i dettagli. Il modello
+    // sa così cosa sta guardando e cosa gli manca.
+    // In modalità 'last-commit' il riepilogo è già dentro l'output (`--stat`
+    // è fra gli argomenti), quindi non serve una seconda chiamata.
+    const summary =
+      input.mode === 'last-commit' ? '' : await this.buildSummary(input);
+
+    return { content: summary + truncateOutput(result.stdout), isError: false };
   }
 
   private validate(rawInput: unknown): GitDiffInput {
@@ -164,5 +180,25 @@ export class GitDiffTool implements AgentTool {
     // un'opzione: senza, un path che inizia per `-` verrebbe interpretato
     // come flag.
     return input.path ? [...base, '--', input.path] : base;
+  }
+
+  /** Riepilogo per file (`--stat`), da mettere in testa al dettaglio. */
+  private async buildSummary(input: GitDiffInput): Promise<string> {
+    const base =
+      input.mode === 'staged'
+        ? ['diff', '--staged', '--no-color', '--stat']
+        : ['diff', '--no-color', '--stat'];
+    const args = input.path ? [...base, '--', input.path] : base;
+
+    const stat = await safeExec('git', args, {
+      cwd: this.repoRoot,
+      timeoutMs: 10_000,
+    });
+
+    // Se il riepilogo fallisce non è un problema: si perde un'informazione
+    // utile, non il diff. Meglio restituire il dettaglio da solo che un errore.
+    if (stat.exitCode !== 0 || stat.stdout.trim().length === 0) return '';
+
+    return `RIEPILOGO DEI FILE MODIFICATI:\n${stat.stdout.trim()}\n\nDETTAGLIO:\n`;
   }
 }

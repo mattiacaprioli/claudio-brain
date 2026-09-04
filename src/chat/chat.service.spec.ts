@@ -1,6 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import type { LlmService } from '../llm/llm.service.js';
+import type { AgentRun } from './agent.service.js';
+import type { AgentService } from './agent.service.js';
+import type { ToolCallsRepository } from '../tools/tool-calls.repository.js';
 import { ChatService } from './chat.service.js';
 import type {
   ConversationMemory,
@@ -47,16 +49,26 @@ describe('ChatService', () => {
       touchConversation: vi.fn(async () => undefined),
     } as unknown as MessagesRepository;
 
-    const llm = {
-      complete: vi.fn(async () => ({
-        text: 'risposta finta',
-        model: 'claude-opus-5',
-        inputTokens: 100,
-        outputTokens: 20,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-      })),
-    } as unknown as LlmService;
+    // Il finto AGENTE: il loop dei tool ha i suoi test in
+    // agent.service.spec.ts, qui interessa solo cosa ChatService gli passa.
+    const agentRun: AgentRun = {
+      text: 'risposta finta',
+      model: 'claude-opus-5',
+      iterations: 1,
+      executions: [],
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+    };
+    const agent = {
+      run: vi.fn(async () => agentRun),
+    } as unknown as AgentService;
+
+    const toolCalls = {
+      record: vi.fn(async () => undefined),
+      listByConversation: vi.fn(async () => []),
+    } as unknown as ToolCallsRepository;
 
     const summaries = {
       maybeSummarize: vi.fn(async () => false),
@@ -75,11 +87,12 @@ describe('ChatService', () => {
     const config = { get: () => undefined } as unknown as ConfigService;
 
     return {
-      service: new ChatService(repo, llm, summaries, rag, config),
+      service: new ChatService(repo, summaries, rag, agent, toolCalls, config),
       repo,
-      llm,
+      agent,
       summaries,
       rag,
+      toolCalls,
       inserted,
     };
   }
@@ -102,7 +115,7 @@ describe('ChatService', () => {
 
   it('manda al modello TUTTO lo storico, in ordine cronologico', async () => {
     // Lo storico che il DB restituirà: 2 turni passati + la domanda di adesso.
-    const { service, llm } = buildFakes({
+    const { service, agent } = buildFakes({
       recent: [
         makeStoredMessage(1, 'user', 'Mi chiamo Mattia'),
         makeStoredMessage(2, 'assistant', 'Ciao Mattia!'),
@@ -117,7 +130,7 @@ describe('ChatService', () => {
 
     // Questa asserzione È il concetto di statelessness: il modello non ricorda
     // nulla, quindi il ricordo "mi chiamo Mattia" deve essere nella richiesta.
-    expect(llm.complete).toHaveBeenCalledWith(
+    expect(agent.run).toHaveBeenCalledWith(
       [
         { role: 'user', content: 'Mi chiamo Mattia' },
         { role: 'assistant', content: 'Ciao Mattia!' },
@@ -128,7 +141,7 @@ describe('ChatService', () => {
   });
 
   it('mette il riassunto in testa alla richiesta, prima dei messaggi recenti', async () => {
-    const { service, llm } = buildFakes({
+    const { service, agent } = buildFakes({
       memory: { summary: 'Mattia usa NestJS e Postgres.', summaryThroughMessageId: '40' },
       recent: [makeStoredMessage(41, 'user', 'Riprendiamo da dove eravamo')],
     });
@@ -138,7 +151,7 @@ describe('ChatService', () => {
       conversationId: 'existing-id',
     });
 
-    const [messages] = vi.mocked(llm.complete).mock.calls[0];
+    const [messages] = vi.mocked(agent.run).mock.calls[0];
     expect(messages).toHaveLength(2);
     expect(messages[0].role).toBe('user');
     expect(messages[0].content).toContain('Mattia usa NestJS e Postgres.');
@@ -158,11 +171,11 @@ describe('ChatService', () => {
   });
 
   it('attiva il prompt caching sulla chiamata di chat', async () => {
-    const { service, llm } = buildFakes();
+    const { service, agent } = buildFakes();
 
     await service.sendMessage({ message: 'ciao' });
 
-    expect(vi.mocked(llm.complete).mock.calls[0][1]).toEqual({ cache: true });
+    expect(vi.mocked(agent.run).mock.calls[0][1]).toEqual({ cache: true });
   });
 
   it('salva prima la domanda e poi la risposta', async () => {
@@ -186,8 +199,8 @@ describe('ChatService', () => {
   });
 
   it('non perde la domanda dell utente se l LLM fallisce', async () => {
-    const { service, llm, inserted } = buildFakes();
-    vi.mocked(llm.complete).mockRejectedValueOnce(new Error('provider down'));
+    const { service, agent, inserted } = buildFakes();
+    vi.mocked(agent.run).mockRejectedValueOnce(new Error('provider down'));
 
     await expect(service.sendMessage({ message: 'domanda importante' })).rejects.toThrow(
       'provider down',
@@ -215,14 +228,14 @@ describe('ChatService', () => {
     ];
 
     it('mette i frammenti PRIMA della domanda, non in coda', async () => {
-      const { service, llm } = buildFakes({ recent: storico, hits: [makeHit()] });
+      const { service, agent } = buildFakes({ recent: storico, hits: [makeHit()] });
 
       await service.sendMessage({
         message: 'dove sta sendMessage?',
         conversationId: 'existing-id',
       });
 
-      const [messages] = vi.mocked(llm.complete).mock.calls[0];
+      const [messages] = vi.mocked(agent.run).mock.calls[0];
       // storico(2) + contesto(1) + domanda(1)
       expect(messages).toHaveLength(4);
       expect(String(messages[2].content)).toContain('contesto_recuperato');
@@ -230,7 +243,7 @@ describe('ChatService', () => {
     });
 
     it('usa un breakpoint di cache ESPLICITO sull ultimo messaggio stabile', async () => {
-      const { service, llm } = buildFakes({ recent: storico, hits: [makeHit()] });
+      const { service, agent } = buildFakes({ recent: storico, hits: [makeHit()] });
 
       await service.sendMessage({
         message: 'dove sta sendMessage?',
@@ -240,11 +253,11 @@ describe('ChatService', () => {
       // Indice 1 = ultimo messaggio dello storico, cioè la fine del prefisso
       // stabile. Il caching automatico metterebbe il breakpoint in coda, dopo
       // i frammenti: pagheremmo la scrittura su byte mai riletti.
-      expect(vi.mocked(llm.complete).mock.calls[0][1]).toEqual({ cacheUpToIndex: 1 });
+      expect(vi.mocked(agent.run).mock.calls[0][1]).toEqual({ cacheUpToIndex: 1 });
     });
 
     it('non mette breakpoint se non c è ancora prefisso stabile', async () => {
-      const { service, llm } = buildFakes({
+      const { service, agent } = buildFakes({
         recent: [makeStoredMessage(1, 'user', 'prima domanda')],
         hits: [makeHit()],
       });
@@ -253,7 +266,7 @@ describe('ChatService', () => {
 
       // Un solo messaggio: niente da cachare, e un breakpoint su un prefisso
       // vuoto sarebbe solo un costo di scrittura.
-      expect(vi.mocked(llm.complete).mock.calls[0][1]).toEqual({ cache: true });
+      expect(vi.mocked(agent.run).mock.calls[0][1]).toEqual({ cache: true });
     });
 
     it('riporta i frammenti recuperati e da quale metà arrivano', async () => {

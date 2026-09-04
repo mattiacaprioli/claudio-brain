@@ -18,7 +18,7 @@ le parti della teoria di partenza che si sono rivelate invecchiate.
 | --- | --- | --- |
 | **1. API LLM, System Prompt, Memoria** | ✅ **Completata e verificata** | `POST /chat` con storico su Postgres, buffer + summary memory, prompt caching |
 | **2. RAG ed Embeddings** | ✅ **Completata e verificata** | Ricerca ibrida (vettori + full-text) su codice, note e doc hardware con `pgvector` |
-| **3. Function Calling e Agenti** | ⬜ Da fare | Tool Use nativo per comandi di sistema, Git, Docker ed estensioni hardware |
+| **3. Function Calling e Agenti** | ✅ **Completata e verificata** | Tool Use nativo per comandi di sistema, Git, Docker ed estensioni hardware |
 | **4. Streaming, UI React & Hardware** | ⬜ Da fare | Frontend React per Portfolio (Vercel) + predisposizione Kiosk per Raspberry Pi |
 
 **Verificato dal vero il 4 settembre 2026** con API key reali (Anthropic + Voyage): memoria
@@ -465,7 +465,7 @@ si rifiutava di rispondere.
 
 ---
 
-## Fase 3: Function Calling e Agenti Autonomi (Tool Use nativo) ⬜
+## Fase 3: Function Calling e Agenti Autonomi (Tool Use nativo) ✅
 
 ### Obiettivi principali
 
@@ -489,16 +489,84 @@ gli endpoint per l'hardware del Raspberry Pi**.
 4. **Tool hardware — `trigger_hardware_action({ action, payload })`**: webhook o chiamata
    locale per muovere servomotori o attivare componenti, una volta spostato sul Raspberry Pi.
 
-### Note raccolte in Fase 1
+### Cosa è stato costruito (4 settembre 2026)
 
-- Il `content` della risposta è già gestito come **array di blocchi tipizzati**: i blocchi
-  `tool_use` si innestano dove oggi filtriamo solo i `text`.
-- L'SDK offre un **tool runner** che gestisce il loop al posto nostro — da valutare contro il
-  loop manuale, che si capisce meglio ed è più coerente con la scelta "zero magia".
-- I `tool_result` vanno restituiti **tutti in un unico messaggio user**: spezzarli insegna al
-  modello a non fare più chiamate parallele.
-- Le definizioni dei tool stanno in testa al prompt: cambiarle **invalida tutta la cache**.
-- Un tool che fallisce va restituito con `is_error: true`, non silenziato.
+| File | Ruolo |
+| --- | --- |
+| `db/migrations/004_tool_calls.sql` | Registro delle esecuzioni (input `jsonb`, esito, durata) |
+| `src/tools/tool.interface.ts` | Contratto `AgentTool` + troncamento output |
+| `src/tools/safe-exec.ts` | Esecuzione comandi: nessuna shell, whitelist, timeout, env ridotto |
+| `src/tools/git-diff.tool.ts` | `read_git_diff` con riepilogo `--stat` + validazione del path |
+| `src/tools/docker-status.tool.ts` | `get_docker_status` |
+| `src/tools/hardware.tool.ts` | `trigger_hardware_action` (webhook o simulazione dichiarata) |
+| `src/tools/tools.service.ts` | Registro, definizioni ordinate, esecuzione parallela |
+| `src/chat/agent.service.ts` | **Il loop dell'agente** |
+
+Nuovo endpoint: `GET /chat/:id/tools` — cosa ha eseguito l'agente, con esito e durata.
+
+**Loop manuale e non tool runner dell'SDK**, coerentemente con la scelta "zero magia": sono
+poche righe e sono *le* righe che distinguono un chatbot da un agente.
+
+### Il loop, e i tre punti che vanno fatti giusti
+
+```
+modello → "vorrei read_git_diff"
+noi     → eseguiamo, restituiamo l'output
+modello → "vorrei anche get_docker_status"
+noi     → eseguiamo, restituiamo
+modello → risposta finale
+```
+
+1. **I blocchi del modello tornano indietro INVARIATI.** Contengono `thinking` e `tool_use`
+   che il modello si aspetta di ritrovare: ricostruirli dal testo li perderebbe e l'API
+   rifiuterebbe la richiesta.
+2. **Tutti i `tool_result` in UN SOLO messaggio user.** Spezzarli insegna al modello a non
+   chiedere più strumenti in parallelo — peggiora il comportamento in modo permanente e
+   silenzioso.
+3. **Il loop ha un tetto** (`AGENT_MAX_ITERATIONS=6`). Senza, un modello che insiste su uno
+   strumento che continua a fallire gira finché non finisce il credito.
+
+Inoltre: il breakpoint di cache esplicito vale **solo per la prima richiesta** del loop; dal
+secondo giro la coda è cresciuta con i blocchi dei tool e l'indice calcolato prima non punta
+più alla fine del prefisso stabile.
+
+### La sicurezza, che qui è il punto centrale
+
+Un agente che esegue comandi di sistema è la parte del progetto in cui uno sbaglio non
+produce una risposta scadente ma un danno. Quattro difese in `safe-exec.ts`:
+
+1. **Nessuna shell** (`execFile`, argomenti come array). Con `exec('git diff ' + path)` un
+   path come `x; rm -rf ~` esegue due comandi; con `execFile` `;` è solo un carattere. Non è
+   "escaping fatto bene", è un canale diverso — la stessa ragione dei `$1/$2` nel SQL.
+2. **Whitelist dei comandi** (`git`, `docker`), non blacklist: una blacklist è una battaglia
+   persa, basta un comando non previsto.
+3. **Timeout**, o un comando appeso blocca la richiesta e l'intera conversazione.
+4. **Ambiente ridotto** a `PATH` e `HOME`: i comandi eseguiti dall'agente non devono poter
+   leggere le API key che vivono in `process.env`.
+
+A cui si aggiunge la regola sugli argomenti: **arrivano da un modello, quindi sono input non
+fidato**. `read_git_diff` rifiuta path assoluti e path con `..` — senza quel controllo un tool
+di diff diventa un lettore di file arbitrari (`../../../etc/passwd`).
+
+E `trigger_hardware_action` valida `angle` fra 0 e 180 perché è un vincolo **fisico**: un
+angolo fuori scala manda il servo a fondo corsa e lo fa stallare col motore che tira.
+
+### Verifica dal vero (4 settembre 2026)
+
+| Prova | Esito |
+| --- | --- |
+| Due strumenti in parallelo in un turno | ✅ `get_docker_status` + `trigger_hardware_action`, 2 giri |
+| Onestà sulla simulazione | ✅ *"il servo **non** si è mosso, la chiamata è stata SIMULATA"* |
+| `read_git_diff` sulle modifiche reali | ✅ riassunto accurato con `file:riga` |
+| Registro delle esecuzioni | ✅ `GET /chat/:id/tools` con input, esito, durata |
+| Limite fisico violato (270°) | ✅ **zero chiamate**: il modello ha letto lo schema e ha rifiutato |
+
+L'ultima riga è la più interessante: la descrizione dello schema (`angle: 0-180`) ha fatto
+lavoro *preventivo*, e il modello non ha nemmeno tentato la chiamata. La validazione lato
+server resta comunque necessaria — un modello attento non è una garanzia.
+
+Nel loop il caching ha funzionato: al secondo giro `cacheReadTokens: 6251` contro
+`inputTokens: 4`.
 
 ### Domande aperte
 
@@ -541,6 +609,12 @@ mostrare nel portfolio, sia come interfaccia fisica** sul piccolo schermo del Ra
 - Con `thinking: adaptive` il default non mostra il ragionamento: in una UI questo si vede come
   una lunga pausa prima dell'output. Se lo si vuole mostrare serve
   `thinking: { type: 'adaptive', display: 'summarized' }`.
+- **Lo streaming va incrociato con il loop dell'agente della Fase 3**: un turno può richiedere
+  più giri di modello, quindi la UI deve mostrare anche gli stati intermedi ("sto leggendo il
+  git diff…"). I dati ci sono già — `iterations` e `toolCalls` nella risposta di `/chat` — ma
+  in streaming vanno emessi come eventi mentre accadono, non alla fine.
+- `AgentService.run` è il punto in cui innestare l'emissione degli eventi: oggi accumula e
+  restituisce, dovrà anche notificare.
 
 ### Domande aperte
 
@@ -629,6 +703,20 @@ Scan, ed è la scelta giusta. Per verificare che l'indice sia *utilizzabile* ser
 default` in un blocco ```` ```bash ```` è un commento shell, ma sembra un titolo h1. Il
 documento veniva spezzato a metà esempio, separando il comando dalla spiegazione.
 → Tracciare i code fence prima di cercare intestazioni.
+
+**Cercare la stringa iniettata è il modo SBAGLIATO di testare la shell injection.** Il primo
+test di `safeExec` verificava che `git rev-parse 'HEAD; echo COMPROMESSO'` non producesse
+"COMPROMESSO" in output — e falliva, perché `git rev-parse` **ristampa verbatim** l'argomento
+che non riesce a risolvere. Ritrovare la stringa era in realtà la prova che era stata trattata
+come *testo* e non eseguita. → Verificare l'assenza dell'**effetto**, non della stringa: con
+`git ['--version; echo PWNED']`, se una shell interpretasse l'argomento in stdout comparirebbe
+"git version".
+
+**Un diff reale supera il tetto di troncamento, e il modello perde l'elenco dei file.** Il
+diff della Fase 3 era di 19.000 caratteri contro un tetto di 6.000: oltre il punto di taglio il
+modello non sapeva nemmeno *quali* file erano stati toccati, e ha risposto "potrebbero esserci
+altre modifiche che non vedo" — onesto e inutile. → `--stat` in testa al dettaglio: l'elenco
+completo dei file costa una riga per file e arriva sempre.
 
 **`thinking: adaptive` ed `effort` NON sono supportati da tutti i modelli — e il riassuntore
 usava proprio uno di quelli.** Haiku 4.5 e Sonnet 4.5 rispondono `400 invalid_request_error:
