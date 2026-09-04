@@ -1,0 +1,24 @@
+services:
+  postgres:
+    # Immagine con pgvector già compilato dentro: è un Postgres 17 normale,
+    # ma in Fase 2 basterà `CREATE EXTENSION vector` senza cambiare container.
+    image: pgvector/pgvector:pg17
+    container_name: claudio-brain-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: claudio
+      POSTGRES_PASSWORD: claudio
+      POSTGRES_DB: claudio_brain
+    ports:
+      # 5433 sull'host perché la 5432 è già occupata dal Postgres di sistema.
+      - '5433:5432'
+    volumes:
+      - claudio-brain-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U claudio -d claudio_brain']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  claudio-brain-pgdata:
