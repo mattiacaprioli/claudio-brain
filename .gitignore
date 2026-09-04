@@ -1,6 +1,8 @@
 # compiled output
-/dist
-/node_modules
+# Senza la barra iniziale la regola vale a QUALSIASI profondità: con `/dist`
+# soltanto, `web/dist` e `web/node_modules` finirebbero nel commit.
+dist
+node_modules
 *.tsbuildinfo
 
 # logs

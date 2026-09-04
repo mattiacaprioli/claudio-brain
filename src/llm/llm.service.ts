@@ -135,6 +135,14 @@ export interface CompleteOptions {
    * cache di tutto il resto — per questo ToolsService li ordina per nome.
    */
   tools?: Anthropic.Tool[];
+  /**
+   * Segnale di annullamento.
+   *
+   * Serve per un motivo economico, non estetico: se l'utente chiude la pagina
+   * a metà risposta, senza abort la generazione continua fino in fondo e la
+   * paghi tutta per un output che nessuno leggerà.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -182,6 +190,29 @@ export class LlmService {
     messages: Anthropic.MessageParam[],
     options: CompleteOptions = {},
   ): Promise<LlmTurn> {
+    try {
+      const response = await this.client.messages.create(
+        this.buildRequest(messages, options),
+        { signal: options.signal },
+      );
+      return this.toTurn(response, options);
+    } catch (error) {
+      throw this.translateError(error);
+    }
+  }
+
+  /**
+   * Costruisce il corpo della richiesta.
+   *
+   * Estratto in un metodo perché la versione streaming e quella normale
+   * DEVONO mandare esattamente gli stessi parametri: se divergessero, le due
+   * strade userebbero cache diverse (il prefisso cambia) e si comporterebbero
+   * in modo diverso a seconda che l'utente stia guardando la pagina o no.
+   */
+  private buildRequest(
+    messages: Anthropic.MessageParam[],
+    options: CompleteOptions,
+  ): Anthropic.MessageCreateParamsNonStreaming {
     const explicitBreakpoint = options.cacheUpToIndex !== undefined;
     const preparedMessages = explicitBreakpoint
       ? withCacheBreakpoint(messages, options.cacheUpToIndex!)
@@ -197,9 +228,8 @@ export class LlmService {
         }
       : {};
 
-    try {
-      const response = await this.client.messages.create({
-        model,
+    return {
+      model,
 
         // Tetto di sicurezza sui token GENERATI, non un obiettivo: se la
         // risposta lo supera viene troncata a metà frase (stop_reason: max_tokens).
@@ -245,62 +275,109 @@ export class LlmService {
         ...(options.tools && options.tools.length > 0
           ? { tools: options.tools }
           : {}),
+    };
+  }
+
+  /** Traduce la risposta dell'API nel nostro tipo di turno. */
+  private toTurn(response: Anthropic.Message, options: CompleteOptions): LlmTurn {
+    // Un rifiuto per policy NON è un'eccezione: arriva come HTTP 200 con
+    // stop_reason 'refusal'. Va controllato prima di leggere il contenuto.
+    if (response.stop_reason === 'refusal') {
+      throw new InternalServerErrorException(
+        `Il modello ha rifiutato la richiesta: ${response.stop_details?.category ?? 'sconosciuto'}`,
+      );
+    }
+
+    // `content` è un ARRAY di blocchi tipizzati (text, thinking, tool_use...),
+    // non una stringa. Teniamo solo i blocchi di testo.
+    const text = response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+
+    if (response.stop_reason === 'max_tokens') {
+      this.logger.warn(
+        `Risposta troncata: alzato il tetto di ${options.maxTokens ?? this.maxTokens} max_tokens.`,
+      );
+    }
+
+    return {
+      content: response.content,
+      stopReason: response.stop_reason,
+      text,
+      toolUses: response.content.filter(
+        (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+      ),
+      model: response.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: response.usage.cache_creation_input_tokens ?? 0,
+    };
+  }
+
+  /**
+   * Errori tipizzati dall'SDK, dal più specifico al più generico.
+   * Mai fare string matching sul messaggio d'errore.
+   */
+  private translateError(error: unknown): Error {
+    // L'annullamento non è un errore da segnalare: è l'utente che ha chiuso
+    // la pagina. Va propagato così com'è per non finire nei log come guasto.
+    if (error instanceof Error && error.name === 'AbortError') {
+      return error;
+    }
+    if (error instanceof Anthropic.AuthenticationError) {
+      return new InternalServerErrorException(
+        'ANTHROPIC_API_KEY mancante o non valida.',
+      );
+    }
+    if (error instanceof Anthropic.RateLimitError) {
+      return new ServiceUnavailableException(
+        'Rate limit Anthropic raggiunto, riprova tra poco.',
+      );
+    }
+    if (error instanceof Anthropic.APIError) {
+      this.logger.error(`Anthropic API ${error.status}: ${error.message}`);
+      return new ServiceUnavailableException(
+        `Errore dal provider LLM (${error.status}).`,
+      );
+    }
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  /**
+   * Come `converse`, ma emette il testo mentre viene generato.
+   *
+   * Due cose da sapere sull'SDK:
+   *
+   * 1. `client.messages.stream()` restituisce un helper con eventi tipizzati.
+   *    L'evento `text` porta i delta di testo; alla fine `finalMessage()`
+   *    restituisce il messaggio COMPLETO, già riassemblato. Non serve
+   *    accumulare i pezzi a mano né avvolgere gli eventi in una Promise —
+   *    l'SDK lo fa meglio e con meno bug.
+   *
+   * 2. Lo streaming NON è solo estetica: sopra certi valori di `max_tokens`
+   *    una richiesta non-streaming sbatte nei timeout HTTP dell'SDK. Per
+   *    risposte lunghe è l'unico modo.
+   */
+  async streamTurn(
+    messages: Anthropic.MessageParam[],
+    options: CompleteOptions,
+    onText: (delta: string) => void,
+  ): Promise<LlmTurn> {
+    const request = this.buildRequest(messages, options);
+
+    try {
+      const stream = this.client.messages.stream(request, {
+        signal: options.signal,
       });
 
-      // Un rifiuto per policy NON è un'eccezione: arriva come HTTP 200 con
-      // stop_reason 'refusal'. Va controllato prima di leggere il contenuto.
-      if (response.stop_reason === 'refusal') {
-        throw new InternalServerErrorException(
-          `Il modello ha rifiutato la richiesta: ${response.stop_details?.category ?? 'sconosciuto'}`,
-        );
-      }
+      stream.on('text', onText);
 
-      // `content` è un ARRAY di blocchi tipizzati (text, thinking, tool_use...),
-      // non una stringa. Teniamo solo i blocchi di testo.
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('\n');
-
-      if (response.stop_reason === 'max_tokens') {
-        this.logger.warn(
-          `Risposta troncata: alzato il tetto di ${options.maxTokens ?? this.maxTokens} max_tokens.`,
-        );
-      }
-
-      return {
-        content: response.content,
-        stopReason: response.stop_reason,
-        text,
-        toolUses: response.content.filter(
-          (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
-        ),
-        model: response.model,
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-        cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
-        cacheCreationTokens: response.usage.cache_creation_input_tokens ?? 0,
-      };
+      const response = await stream.finalMessage();
+      return this.toTurn(response, options);
     } catch (error) {
-      // Errori tipizzati dall'SDK, dal più specifico al più generico.
-      // Mai fare string matching sul messaggio d'errore.
-      if (error instanceof Anthropic.AuthenticationError) {
-        throw new InternalServerErrorException(
-          'ANTHROPIC_API_KEY mancante o non valida.',
-        );
-      }
-      if (error instanceof Anthropic.RateLimitError) {
-        throw new ServiceUnavailableException(
-          'Rate limit Anthropic raggiunto, riprova tra poco.',
-        );
-      }
-      if (error instanceof Anthropic.APIError) {
-        this.logger.error(`Anthropic API ${error.status}: ${error.message}`);
-        throw new ServiceUnavailableException(
-          `Errore dal provider LLM (${error.status}).`,
-        );
-      }
-      throw error;
+      throw this.translateError(error);
     }
   }
 

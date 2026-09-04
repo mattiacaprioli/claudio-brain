@@ -19,7 +19,7 @@ le parti della teoria di partenza che si sono rivelate invecchiate.
 | **1. API LLM, System Prompt, Memoria** | ✅ **Completata e verificata** | `POST /chat` con storico su Postgres, buffer + summary memory, prompt caching |
 | **2. RAG ed Embeddings** | ✅ **Completata e verificata** | Ricerca ibrida (vettori + full-text) su codice, note e doc hardware con `pgvector` |
 | **3. Function Calling e Agenti** | ✅ **Completata e verificata** | Tool Use nativo per comandi di sistema, Git, Docker ed estensioni hardware |
-| **4. Streaming, UI React & Hardware** | ⬜ Da fare | Frontend React per Portfolio (Vercel) + predisposizione Kiosk per Raspberry Pi |
+| **4. Streaming, UI React & Hardware** | 🔧 **In corso** | Streaming SSE e UI React fatti e verificati; resta il deploy (Vercel + kiosk) |
 
 **Verificato dal vero il 4 settembre 2026** con API key reali (Anthropic + Voyage): memoria
 conversazionale, prompt caching, ingestion di 154 chunk e ricerca ibrida funzionanti.
@@ -576,7 +576,7 @@ Nel loop il caching ha funzionato: al secondo giro `cacheReadTokens: 6251` contr
 
 ---
 
-## Fase 4: Streaming, UI React (Portfolio) & Raspberry Pi Kiosk ⬜
+## Fase 4: Streaming, UI React (Portfolio) & Raspberry Pi Kiosk 🔧
 
 ### Obiettivi principali
 
@@ -598,14 +598,62 @@ mostrare nel portfolio, sia come interfaccia fisica** sul piccolo schermo del Ra
 3. **Build Docker multi-architettura**: `linux/amd64` per server e cloud, `linux/arm64` per il
    Raspberry Pi.
 
-### Note raccolte in Fase 1
+### Cosa è stato costruito (4 settembre 2026)
 
-- `LlmService.complete()` va affiancato da un metodo basato su `client.messages.stream()`. Lo
-  streaming è **obbligatorio** per `max_tokens` alti: oltre certe soglie si sbatte nei timeout
-  HTTP dell'SDK.
-- Il salvataggio della risposta va spostato a fine stream, accumulando i chunk.
-- Il campo `usage` arriva **alla fine** dello stream: la logica di persistenza dei token si
-  adatta, non si riscrive.
+| File | Ruolo |
+| --- | --- |
+| `src/chat/stream-events.ts` | Il protocollo: unione discriminata degli eventi + frame SSE |
+| `src/llm/llm.service.ts` | `streamTurn()` con `client.messages.stream()` e `AbortSignal` |
+| `src/chat/agent.service.ts` | Lo stesso loop, con emissione di eventi per ogni passo |
+| `src/chat/chat.controller.ts` | `POST /chat/stream` e `GET /chat/meta` |
+| `web/src/api.ts` | Client SSE con buffer dei frame incompleti |
+| `web/src/markdown.tsx` | Renderer Markdown senza `innerHTML` |
+| `web/src/components/Rail.tsx` | La gutter: la macchina resa visibile |
+| `web/src/styles.css` | Palette, tipografia, griglia, kiosk |
+
+**`POST` e non `@Sse()`/`EventSource`.** `EventSource` sa fare solo GET senza corpo, e i
+messaggi arrivano a 20.000 caratteri: non stanno in una URL. Quindi il *formato* SSE su una
+POST, letta con `fetch` + ReadableStream. È anche il motivo per cui lo fanno così tutte le chat
+moderne.
+
+**Lo streaming è lo stesso metodo, non una variante.** `sendMessage(input, emit?)`: senza
+`emit` si comporta esattamente come prima. Se lo streaming avesse un percorso separato, le due
+strade divergerebbero alla prima modifica — una salverebbe il riassunto e l'altra no.
+
+**L'annullamento non è cortesia formale**: se l'utente chiude la pagina, `res.on('close')`
+aborta la richiesta all'API. Senza, il modello continua a generare e la risposta la paghi tutta
+per un output che nessuno leggerà.
+
+### Il design dell'interfaccia
+
+Concetto: **non una chat, un banco di lavoro**. In ogni altra interfaccia conversazionale la
+macchina è nascosta; qui è il soggetto. Il discorso scorre in una colonna e le misure — file
+letti, comandi eseguiti, token — stanno appese nel margine sinistro, come le annotazioni a lato
+di un manoscritto.
+
+- **Palette**: grigio-freddo (non il crema di ogni pagina generata, non il nero con accento
+  acido di ogni chat), **un solo** colore-segnale teal per tutta la strumentazione. Variante
+  scura costruita, non invertita.
+- **Tipografia**: IBM Plex Sans + Mono — famiglia nata per i prodotti tecnici IBM, e il mono
+  qui è *contenuto* (path, token, nomi di tool), non decorazione.
+- **Le due tacche** accanto a ogni frammento dicono quale metà della ricerca ibrida l'ha
+  trovato. Sostituiscono un pill con la parola "entrambe", che costava una riga per frammento e
+  marcava il caso NORMALE — si evidenziano le eccezioni, non la norma.
+- **Movimento**: solo il testo che arriva e il puntino di "in corso". Nessun fade-in di sezione.
+
+### Verifica dal vero (4 settembre 2026)
+
+Sequenza di eventi osservata su una domanda che usa uno strumento:
+
+```
+conversation → retrieval (4 frammenti) → iteration 1 → tool_start
+→ tool_end (74 ms) → iteration 2 → text … text → done
+```
+
+`cacheReadTokens: 6122` contro `inputTokens: 4`: la cache regge anche in streaming.
+
+UI verificata a schermo con screenshot a 1280px e a 430px (formato kiosk), contrasti misurati
+in entrambe le palette.
 - Con `thinking: adaptive` il default non mostra il ragionamento: in una UI questo si vede come
   una lunga pausa prima dell'output. Se lo si vuole mostrare serve
   `thinking: { type: 'adaptive', display: 'summarized' }`.
@@ -616,11 +664,14 @@ mostrare nel portfolio, sia come interfaccia fisica** sul piccolo schermo del Ra
 - `AgentService.run` è il punto in cui innestare l'emissione degli eventi: oggi accumula e
   restituisce, dovrà anche notificare.
 
-### Domande aperte
+### Cosa resta
 
-- Come integrare Vercel AI SDK con un backend NestJS esistente?
-- Come mostrare in tempo reale lo stato di esecuzione di un tool?
-- Il Raspberry Pi regge il backend, o fa solo da display verso un backend remoto?
+- **Deploy**: build su Vercel con `Root Directory: web`, e il backend raggiungibile.
+- **Kiosk sul Raspberry**: Chromium a tutto schermo; da decidere se il Pi regge il backend o fa
+  solo da display verso un backend remoto (il RAG e Postgres su un Pi sono pesanti).
+- **Vercel AI SDK**: valutato dopo, ora che il protocollo lo conosciamo a fondo. Gli eventi
+  `tool_start`/`tool_end` sono nostri e andrebbero mappati sul suo formato.
+- Servire la build statica dal backend, per avere una sola origine e nessun proxy.
 
 ---
 
@@ -675,6 +726,24 @@ in Node 24.
 **Chiave API vuota = errore generico a runtime.** Con `ANTHROPIC_API_KEY=''` l'SDK non solleva
 un `AuthenticationError`: esplode in `buildHeaders` con un `Error` generico, prima di fare la
 richiesta. → Validazione fail-fast nel costruttore di `LlmService`.
+
+**`justify-self: start` su un blocco di testo in griglia lo fa sfondare.** Un elemento di
+griglia con `justify-self: start` si dimensiona sul CONTENUTO invece di riempire la colonna:
+con un `max-width: 40rem` su un viewport da 500px il testo finiva tagliato **fuori dallo
+schermo**. Trovato solo misurando (`getBoundingClientRect` su tutti gli elementi), non
+guardando. Cugino dello stesso problema: `min-width: auto` di default sui figli di
+griglia/flex, che fa allargare la colonna a un blocco di codice lungo invece di farlo scorrere
+dentro di sé. → `justify-self: stretch` sui blocchi, `min-width: 0` sui figli di griglia.
+
+**Il grigio tenue "che sembra giusto" su fondo chiaro non passa l'accessibilità.** `#8b9ba4` sul
+fondo grigio dava **2.44:1**, contro il minimo AA di 4.5 — leggibile per chi l'ha scelto, non
+per chi legge. In dark mode invece passava. → Contrasti **calcolati**, non stimati: ora 6.6 e
+4.6 in chiaro, 9.4 e 6.4 in scuro.
+
+**Un renderer Markdown che produce HTML apre un buco XSS.** Il testo arriva da un LLM, che può
+generare `<script>` o un `onerror` in un tag immagine: `dangerouslySetInnerHTML` su quell'output
+è lo stesso errore degli argomenti dei tool non validati, ma sul browser. → Renderer che produce
+nodi React (escapati per costruzione), nessun passaggio di HTML del modello.
 
 **Il prompt caching può essere silenziosamente inattivo.** Sotto i 512 token di prefisso (su
 Opus 5) la cache non si crea e non c'è nessun errore. → Verificare sempre

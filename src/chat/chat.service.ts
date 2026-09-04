@@ -3,6 +3,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { loadMemoryConfig, type MemoryConfig } from '../config/memory.config.js';
 import { ToolCallsRepository } from '../tools/tool-calls.repository.js';
+import { ToolsService } from '../tools/tools.service.js';
 import { AgentService } from './agent.service.js';
 import type { SearchHit } from '../rag/rag.repository.js';
 import { RagService } from '../rag/rag.service.js';
@@ -11,6 +12,7 @@ import {
   type ConversationStats,
   type StoredMessage,
 } from './messages.repository.js';
+import type { EmitEvent } from './stream-events.js';
 import { SummaryService } from './summary.service.js';
 
 export interface ChatResult {
@@ -58,6 +60,7 @@ export class ChatService {
     private readonly summaries: SummaryService,
     private readonly rag: RagService,
     private readonly agent: AgentService,
+    private readonly tools: ToolsService,
     private readonly toolCalls: ToolCallsRepository,
     config: ConfigService,
   ) {
@@ -68,14 +71,26 @@ export class ChatService {
    * Il giro completo di un turno di conversazione. Sono sei passi e
    * l'ordine non è casuale — vedi i commenti.
    */
-  async sendMessage(input: {
-    message: string;
-    conversationId?: string;
-  }): Promise<ChatResult> {
+  async sendMessage(
+    input: { message: string; conversationId?: string; signal?: AbortSignal },
+    /**
+     * Se presente, il turno viene generato in streaming e ogni passo emesso
+     * come evento.
+     *
+     * È lo STESSO metodo, non una variante: se lo streaming avesse un suo
+     * percorso separato, le due strade divergerebbero alla prima modifica —
+     * una salverebbe il riassunto e l'altra no, una registrerebbe le chiamate
+     * ai tool e l'altra no. Il bug più noioso da trovare.
+     */
+    emit?: EmitEvent,
+  ): Promise<ChatResult> {
     // 1. Risolviamo la conversazione. Se il client manda un id inesistente
     //    rispondiamo 404 invece di crearne silenziosamente una nuova: un id
     //    sbagliato è un bug del client, non una nuova chat.
     const conversationId = await this.resolveConversation(input);
+    // Primo evento: il client ha subito l'id per i turni successivi, anche se
+    // il modello non ha ancora prodotto un solo token.
+    if (emit) emit({ type: 'conversation', conversationId });
 
     // 2. Salviamo il messaggio utente PRIMA di chiamare il modello.
     //    Due motivi: (a) se l'LLM va in errore la domanda non va persa;
@@ -101,6 +116,25 @@ export class ChatService {
     // 4. RAG: cerchiamo nel codice e nella documentazione locale i frammenti
     //    utili alla domanda. Restituisce [] se il RAG è disattivato.
     const hits = await this.rag.search(input.message);
+    if (emit && hits.length > 0) {
+      emit({
+        type: 'retrieval',
+        fragments: hits.map((hit) => ({
+          path: hit.path,
+          lines:
+            hit.start_line && hit.end_line
+              ? `${hit.start_line}-${hit.end_line}`
+              : null,
+          symbol: hit.symbol,
+          foundBy:
+            hit.semantic_rank !== null && hit.keyword_rank !== null
+              ? 'entrambe'
+              : hit.semantic_rank !== null
+                ? 'semantica'
+                : 'full-text',
+        })),
+      });
+    }
 
     // 5. Componiamo la richiesta e chiamiamo il modello (l'API è stateless:
     //    tutto ciò che deve "ricordare" va dentro questa richiesta).
@@ -116,7 +150,11 @@ export class ChatService {
       // Con il RAG attivo serve un breakpoint ESPLICITO invece del caching
       // automatico: il prompt finisce con i frammenti recuperati, che cambiano
       // ad ogni domanda. Vedi il commento in buildRequest.
-      cacheUpToIndex !== null ? { cacheUpToIndex } : { cache: true },
+      {
+        ...(cacheUpToIndex !== null ? { cacheUpToIndex } : { cache: true }),
+        signal: input.signal,
+      },
+      emit,
     );
 
     // 6. Persistiamo la risposta con il suo consumo di token.
@@ -154,6 +192,19 @@ export class ChatService {
         `Sintesi fallita per ${conversationId}: ${String(error)}. Riprovo al prossimo turno.`,
       );
     });
+
+    if (emit) {
+      emit({
+        type: 'done',
+        usage: {
+          model: reply.model,
+          inputTokens: reply.inputTokens,
+          outputTokens: reply.outputTokens,
+          cacheReadTokens: reply.cacheReadTokens,
+          iterations: reply.iterations,
+        },
+      });
+    }
 
     return {
       conversationId,
@@ -195,6 +246,18 @@ export class ChatService {
   async getMessages(conversationId: string): Promise<StoredMessage[]> {
     await this.assertExists(conversationId);
     return this.messages.listMessages(conversationId);
+  }
+
+  /** Inventario degli strumenti e stato dell'indice: alimenta lo stato iniziale della UI. */
+  async getMeta() {
+    return {
+      tools: this.tools.definitions().map((tool) => ({
+        name: tool.name,
+        description: tool.description ?? '',
+      })),
+      ragEnabled: this.rag.enabled,
+      index: await this.rag.stats(),
+    };
   }
 
   /** Registro delle esecuzioni degli strumenti per una conversazione. */

@@ -3,6 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { AgentRun } from './agent.service.js';
 import type { AgentService } from './agent.service.js';
 import type { ToolCallsRepository } from '../tools/tool-calls.repository.js';
+import type { ToolsService } from '../tools/tools.service.js';
 import { ChatService } from './chat.service.js';
 import type {
   ConversationMemory,
@@ -12,6 +13,7 @@ import type {
 import type { SearchHit } from '../rag/rag.repository.js';
 import type { RagService } from '../rag/rag.service.js';
 import type { SummaryService } from './summary.service.js';
+import type { ChatStreamEvent } from './stream-events.js';
 import { makeStoredMessage } from './testing/message-fixtures.js';
 
 /**
@@ -65,6 +67,12 @@ describe('ChatService', () => {
       run: vi.fn(async () => agentRun),
     } as unknown as AgentService;
 
+    const tools = {
+      definitions: () => [
+        { name: 'read_git_diff', description: 'legge il diff', input_schema: {} },
+      ],
+    } as unknown as ToolsService;
+
     const toolCalls = {
       record: vi.fn(async () => undefined),
       listByConversation: vi.fn(async () => []),
@@ -87,7 +95,7 @@ describe('ChatService', () => {
     const config = { get: () => undefined } as unknown as ConfigService;
 
     return {
-      service: new ChatService(repo, summaries, rag, agent, toolCalls, config),
+      service: new ChatService(repo, summaries, rag, agent, tools, toolCalls, config),
       repo,
       agent,
       summaries,
@@ -130,14 +138,12 @@ describe('ChatService', () => {
 
     // Questa asserzione È il concetto di statelessness: il modello non ricorda
     // nulla, quindi il ricordo "mi chiamo Mattia" deve essere nella richiesta.
-    expect(agent.run).toHaveBeenCalledWith(
-      [
-        { role: 'user', content: 'Mi chiamo Mattia' },
-        { role: 'assistant', content: 'Ciao Mattia!' },
-        { role: 'user', content: 'Come mi chiamo?' },
-      ],
-      { cache: true },
-    );
+    const [messages] = vi.mocked(agent.run).mock.calls[0];
+    expect(messages).toEqual([
+      { role: 'user', content: 'Mi chiamo Mattia' },
+      { role: 'assistant', content: 'Ciao Mattia!' },
+      { role: 'user', content: 'Come mi chiamo?' },
+    ]);
   });
 
   it('mette il riassunto in testa alla richiesta, prima dei messaggi recenti', async () => {
@@ -175,7 +181,7 @@ describe('ChatService', () => {
 
     await service.sendMessage({ message: 'ciao' });
 
-    expect(vi.mocked(agent.run).mock.calls[0][1]).toEqual({ cache: true });
+    expect(vi.mocked(agent.run).mock.calls[0][1]).toMatchObject({ cache: true });
   });
 
   it('salva prima la domanda e poi la risposta', async () => {
@@ -253,7 +259,9 @@ describe('ChatService', () => {
       // Indice 1 = ultimo messaggio dello storico, cioè la fine del prefisso
       // stabile. Il caching automatico metterebbe il breakpoint in coda, dopo
       // i frammenti: pagheremmo la scrittura su byte mai riletti.
-      expect(vi.mocked(agent.run).mock.calls[0][1]).toEqual({ cacheUpToIndex: 1 });
+      expect(vi.mocked(agent.run).mock.calls[0][1]).toMatchObject({
+        cacheUpToIndex: 1,
+      });
     });
 
     it('non mette breakpoint se non c è ancora prefisso stabile', async () => {
@@ -266,7 +274,7 @@ describe('ChatService', () => {
 
       // Un solo messaggio: niente da cachare, e un breakpoint su un prefisso
       // vuoto sarebbe solo un costo di scrittura.
-      expect(vi.mocked(agent.run).mock.calls[0][1]).toEqual({ cache: true });
+      expect(vi.mocked(agent.run).mock.calls[0][1]).toMatchObject({ cache: true });
     });
 
     it('riporta i frammenti recuperati e da quale metà arrivano', async () => {
@@ -292,6 +300,53 @@ describe('ChatService', () => {
         'semantica',
       ]);
       expect(result.retrieved[0].lines).toBe('10-40');
+    });
+  });
+
+  describe('streaming', () => {
+    it('emette gli eventi nell ordine giusto', async () => {
+      const { service, agent } = buildFakes({ hits: [makeHit()] });
+      const eventi: ChatStreamEvent[] = [];
+
+      await service.sendMessage({ message: 'ciao' }, (e) => eventi.push(e));
+
+      // `conversation` deve arrivare PRIMA di tutto: il client ha l'id anche
+      // se il modello non ha ancora prodotto un token, e può già salvarlo.
+      expect(eventi[0]).toEqual({
+        type: 'conversation',
+        conversationId: 'new-conversation-id',
+      });
+      // I frammenti recuperati arrivano prima che il modello parli, così la
+      // UI può mostrare "sto guardando questi file" subito.
+      expect(eventi[1].type).toBe('retrieval');
+      expect(eventi.at(-1)?.type).toBe('done');
+
+      // Il testo lo emette l'agente (finto qui), non ChatService.
+      expect(agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.any(Function),
+      );
+    });
+
+    it('non emette retrieval se il RAG non ha trovato nulla', async () => {
+      const { service } = buildFakes();
+      const eventi: ChatStreamEvent[] = [];
+
+      await service.sendMessage({ message: 'ciao' }, (e) => eventi.push(e));
+
+      expect(eventi.some((e) => e.type === 'retrieval')).toBe(false);
+    });
+
+    it('senza emit non cambia nulla: è lo stesso percorso', async () => {
+      const { service } = buildFakes();
+
+      const result = await service.sendMessage({ message: 'ciao' });
+
+      // Se lo streaming avesse un percorso separato, le due strade
+      // divergerebbero alla prima modifica.
+      expect(result.reply).toBe('risposta finta');
+      expect(vi.mocked(buildFakes().agent.run).mock.calls.length).toBe(0);
     });
   });
 

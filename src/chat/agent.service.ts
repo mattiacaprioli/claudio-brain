@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LlmService, type CompleteOptions } from '../llm/llm.service.js';
 import { ToolsService, type ToolExecution } from '../tools/tools.service.js';
+import type { EmitEvent } from './stream-events.js';
 
 export interface AgentRun {
   /** Testo finale destinato all'utente. */
@@ -61,6 +62,12 @@ export class AgentService {
   async run(
     messages: Anthropic.MessageParam[],
     options: CompleteOptions = {},
+    /**
+     * Se presente, il turno viene generato in STREAMING e ogni passo emesso
+     * come evento. Senza, il comportamento è identico a prima: è lo stesso
+     * loop, non una seconda implementazione da tenere in sincrono.
+     */
+    emit?: EmitEvent,
   ): Promise<AgentRun> {
     const conversation = [...messages];
     const executions: ToolExecution[] = [];
@@ -74,7 +81,9 @@ export class AgentService {
     for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
       iterations = iteration;
 
-      const turn = await this.llm.converse(conversation, {
+      if (emit) emit({ type: 'iteration', index: iteration });
+
+      const turnOptions = {
         ...options,
         tools: definitions.length > 0 ? definitions : undefined,
         // Il breakpoint di cache esplicito vale solo per la PRIMA richiesta:
@@ -82,7 +91,13 @@ export class AgentService {
         // i blocchi dei tool, e l'indice calcolato prima non punta più alla
         // fine del prefisso stabile.
         ...(iteration > 1 ? { cacheUpToIndex: undefined, cache: true } : {}),
-      });
+      };
+
+      const turn = emit
+        ? await this.llm.streamTurn(conversation, turnOptions, (delta) =>
+            emit({ type: 'text', text: delta }),
+          )
+        : await this.llm.converse(conversation, turnOptions);
 
       totals.input += turn.inputTokens;
       totals.output += turn.outputTokens;
@@ -107,8 +122,30 @@ export class AgentService {
       // Punto 1: i blocchi del modello tornano indietro invariati.
       conversation.push({ role: 'assistant', content: turn.content });
 
+      // Gli eventi di inizio si emettono PRIMA di eseguire: è tutto il senso
+      // dello streaming, far vedere all'utente "sto leggendo il git diff…"
+      // mentre accade e non dopo.
+      if (emit) {
+        for (const use of turn.toolUses) {
+          emit({ type: 'tool_start', id: use.id, name: use.name, input: use.input });
+        }
+      }
+
       const results = await this.tools.executeAll(turn.toolUses);
       executions.push(...results);
+
+      if (emit) {
+        for (const execution of results) {
+          emit({
+            type: 'tool_end',
+            id: execution.toolUseId,
+            name: execution.name,
+            isError: execution.result.isError,
+            durationMs: execution.durationMs,
+            preview: execution.result.content.slice(0, 200),
+          });
+        }
+      }
 
       // Punto 2: tutti i risultati in un unico messaggio user.
       conversation.push({
