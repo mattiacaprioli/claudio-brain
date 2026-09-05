@@ -30,6 +30,15 @@
   --signal-wash: #dbeae7;
   --alert: #a3261e;
 
+  /* La faccia ha bisogno di colori suoi, e non è un capriccio: il suo schermo
+     è SCURO IN ENTRAMBI I TEMI — è uno schermo, non una superficie. Occhi e
+     bocca disegnati con `--signal` sarebbero quindi teal scuro (#0b6e67) su
+     fondo scuro in tema chiaro, cioè illeggibili. Queste tre restano identiche
+     nei due temi perché il fondo su cui poggiano non cambia mai. */
+  --face-screen: #16232a;
+  --face-glow: #63c2b6;
+  --face-alarm: #f0918a;
+
   --sans: 'IBM Plex Sans', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
 
@@ -58,6 +67,11 @@
     --signal: #63c2b6;
     --signal-wash: #1f3a37;
     --alert: #f0918a;
+
+    /* Solo lo schermo scende: sul tema scuro deve restare più scuro della
+       superficie della testa, o la faccia si appiattisce in una macchia sola.
+       `--face-glow` e `--face-alarm` NON cambiano: vedi il commento sopra. */
+    --face-screen: #0b1116;
   }
 }
 
@@ -99,16 +113,31 @@ body {
   display: grid;
   grid-template-columns: var(--gutter) minmax(0, 1fr);
   gap: 0.35rem var(--gap);
+  align-items: center;
   padding: 2.25rem 0 1.5rem;
 }
 
-/* Marchio e nota stanno entrambi NELLA gutter, allineati a destra: così la
-   gutter è una colonna con un ruolo già dal primo sguardo, e la colonna del
-   discorso comincia pulita. */
-.brand {
+/* Faccia, marchio e nota stanno tutti NELLA gutter, allineati a destra: così
+   la gutter è una colonna con un ruolo già dal primo sguardo, e la colonna del
+   discorso comincia pulita.
+
+   Sono raggruppati in un flex e non messi in griglia uno per uno: tre elementi
+   tutti in colonna 1 con `justify-self: end` si sovrapporrebbero. La faccia sta
+   a sinistra e il testo a destra, così il bordo destro della gutter resta netto
+   come per l'inventario dello stato vuoto. */
+.identity {
   grid-column: 1;
-  grid-row: 1;
-  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.7rem;
+}
+
+.identity-text {
+  text-align: right;
+}
+
+.brand {
   margin: 0;
   font-size: 2rem;
   font-weight: 600;
@@ -117,26 +146,216 @@ body {
 }
 
 .brand-note {
-  grid-column: 1;
-  grid-row: 2;
-  justify-self: end;
-  margin: 0;
+  margin: 0.35rem 0 0;
   max-width: 15rem;
   font-family: var(--mono);
   font-size: 0.72rem;
   line-height: 1.5;
-  text-align: right;
   color: var(--ink-faint);
 }
 
 .conversation-id {
   grid-column: 2;
-  grid-row: 1;
   justify-self: start;
   align-self: center;
   font-family: var(--mono);
   font-size: 0.7rem;
   color: var(--ink-faint);
+}
+
+/* ---------- La faccia -------------------------------------------------- */
+
+/*
+  Ogni stato ha un tratto STATICO oltre alla sua animazione — occhi strizzati,
+  punta accesa, bocca aperta, colore d'allarme. Non è ridondanza: in fondo a
+  questo foglio `prefers-reduced-motion` spegne tutte le animazioni, e uno
+  stato che esiste solo nel movimento sparirebbe del tutto per chi lo attiva.
+*/
+
+.face {
+  width: 3rem;
+  height: auto;
+  flex: none;
+  /* L'anello dell'antenna si espande oltre il viewBox: senza questo verrebbe
+     tagliato a metà proprio nel fotogramma in cui si vede. */
+  overflow: visible;
+}
+
+.face-head {
+  fill: var(--surface);
+  stroke: var(--rule);
+  stroke-width: 1.5;
+}
+
+.face-ear {
+  fill: var(--rule);
+}
+
+.face-screen {
+  fill: var(--face-screen);
+}
+
+.face-stem {
+  stroke: var(--rule);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.face-tip {
+  fill: var(--face-glow);
+  /* A riposo la punta è spenta: accendersi deve voler dire qualcosa. */
+  opacity: 0.3;
+  transition: opacity 0.2s ease;
+}
+
+.face-ping {
+  fill: none;
+  stroke: var(--face-glow);
+  stroke-width: 1.5;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.face-eye,
+.face-mouth {
+  fill: var(--face-glow);
+  /* `fill-box` fa sì che l'origine sia il centro DELL'ELEMENTO e non del
+     viewBox: senza, uno scaleY schiaccerebbe l'occhio verso il bordo alto
+     dell'SVG invece che su sé stesso. */
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.18s ease;
+}
+
+.face-scanline {
+  fill: var(--face-glow);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* --- in attesa: solo il battito di palpebre --- */
+
+.face[data-state='idle'] .face-eye,
+.face[data-state='reading'] .face-eye,
+.face[data-state='working'] .face-eye,
+.face[data-state='speaking'] .face-eye {
+  animation: face-blink 5.5s ease-in-out infinite;
+}
+
+/* --- legge: lo sguardo scorre sui file trovati --- */
+
+/*
+  Tre passate e poi lo sguardo si posa, invece di scorrere all'infinito: dopo
+  `retrieval` il modello può metterci qualche secondo prima del primo token, e
+  occhi che continuano a muoversi tornerebbero a essere il ciclo decorativo che
+  si voleva evitare. Tre passate dicono "ha letto". Lo smorzamento lo fa il CSS
+  con un conteggio finito: nessun timer da gestire in JavaScript.
+*/
+.face[data-state='reading'] .face-eyes {
+  animation: face-scan 1.3s ease-in-out 3;
+}
+
+.face[data-state='reading'] .face-scanline {
+  opacity: 0.5;
+  animation: face-scanline 1.3s ease-in-out 3 forwards;
+}
+
+/* --- ragiona: lo sguardo si stringe --- */
+
+.face[data-state='thinking'] .face-eye {
+  transform: scaleY(0.45);
+}
+
+/* --- lavora: l'antenna pulsa --- */
+
+.face[data-state='working'] .face-tip {
+  opacity: 1;
+}
+
+.face[data-state='working'] .face-ping {
+  animation: face-ping 1.4s ease-out infinite;
+}
+
+/* --- parla: la bocca si muove mentre il testo arriva --- */
+
+.face[data-state='speaking'] .face-mouth {
+  transform: scaleY(2);
+  animation: face-talk 0.42s ease-in-out infinite;
+}
+
+/* --- errore: occhi piatti, tutto in allarme --- */
+
+.face[data-state='error'] .face-eye {
+  fill: var(--face-alarm);
+  transform: scaleY(0.22);
+}
+
+.face[data-state='error'] .face-mouth,
+.face[data-state='error'] .face-tip {
+  fill: var(--face-alarm);
+}
+
+@keyframes face-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes face-scan {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+@keyframes face-scanline {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  15%,
+  85% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes face-ping {
+  0% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@keyframes face-talk {
+  0%,
+  100% {
+    transform: scaleY(0.7);
+  }
+  50% {
+    transform: scaleY(3) scaleX(0.85);
+  }
 }
 
 /* ---------- Trascrizione ---------------------------------------------- */
@@ -645,18 +864,16 @@ body {
     gap: 0.75rem;
   }
 
-  /* Ogni elemento dell'header prende la sua riga: lasciandoli tutti su
-     grid-row 1 il marchio e l'id si sovrappongono. */
-  .brand {
-    grid-row: 1;
+  /* La gutter non esiste più: faccia e marchio si allineano a sinistra, e
+     restano appaiati — la faccia continua a fare da indicatore accanto al
+     nome invece di scendere su una riga sua. */
+  .identity {
+    grid-column: 1;
+    justify-content: flex-start;
   }
 
-  .brand-note {
-    grid-row: 2;
-  }
-
-  .conversation-id {
-    grid-row: 3;
+  .identity-text {
+    text-align: left;
   }
 
   /* `justify-self: start` SOLO sugli elementi piccoli della gutter.
@@ -664,8 +881,6 @@ body {
      griglia con justify-self start si dimensiona sul CONTENUTO invece di
      riempire la colonna, quindi il suo max-width sfonda la colonna e il
      testo finisce tagliato fuori dallo schermo. */
-  .brand,
-  .brand-note,
   .conversation-id {
     grid-column: 1;
     justify-self: start;
