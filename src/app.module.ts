@@ -1,8 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
 import { ChatModule } from './chat/chat.module.js';
+import { HealthController } from './health.controller.js';
 import { RagModule } from './rag/rag.module.js';
 
 @Module({
@@ -13,7 +12,6 @@ import { RagModule } from './rag/rag.module.js';
     ChatModule,
     RagModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  controllers: [HealthController],
 })
 export class AppModule {}
