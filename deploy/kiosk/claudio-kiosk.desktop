@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Claudio Kiosk
+Comment=Apre l'interfaccia di Claudio a tutto schermo all'avvio della sessione
+Exec=/home/pi/claudio-brain/deploy/kiosk/claudio-kiosk.sh
+X-GNOME-Autostart-enabled=true
+
+# Va copiato in ~/.config/autostart/ — cioè agganciato alla SESSIONE GRAFICA e
+# non a systemd. Un servizio di sistema partirebbe prima che esista un display
+# a cui attaccarsi, e Chromium morirebbe senza DISPLAY/WAYLAND_DISPLAY: il
+# desktop è il posto giusto per una cosa che ha bisogno di un desktop.
+#
+# Il percorso in Exec è assoluto per necessità (l'autostart non ha il concetto
+# di cartella corrente): va corretto se il progetto non sta in
+# /home/pi/claudio-brain.

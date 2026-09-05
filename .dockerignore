@@ -1,0 +1,29 @@
+# Cosa NON entra nel contesto di build.
+#
+# La prima riga è l'unica davvero critica: `.env` contiene la API key, e un
+# `COPY . .` senza questo file la infila nell'immagine — dove resta, in chiaro,
+# in un layer che chiunque abbia l'immagine può estrarre. Le variabili si
+# passano a RUNTIME (env_file di compose, `-e`, o i secret dell'orchestratore),
+# mai in un layer.
+.env
+.env.*
+!.env.example
+
+# Le dipendenze si reinstallano dentro l'immagine con `npm ci`: copiarle
+# dall'host significherebbe portarsi i binari compilati per l'architettura
+# SBAGLIATA quando si costruisce per il Raspberry.
+node_modules
+web/node_modules
+
+# I compilati si rifanno nell'immagine: copiarli rende la build non
+# riproducibile (spedisci ciò che avevi in locale, non ciò che dice il sorgente).
+dist
+web/dist
+*.tsbuildinfo
+
+.git
+.gitignore
+.vscode
+*.log
+Dockerfile
+.dockerignore

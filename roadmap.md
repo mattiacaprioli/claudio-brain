@@ -8,7 +8,7 @@ Questo documento è sia **piano** che **diario di bordo**: ogni fase completata 
 è stato costruito, quali decisioni sono state prese e perché, e cosa si è imparato — comprese
 le parti della teoria di partenza che si sono rivelate invecchiate.
 
-**Ultimo aggiornamento: 4 settembre 2026.**
+**Ultimo aggiornamento: 5 settembre 2026.**
 
 ---
 
@@ -19,7 +19,7 @@ le parti della teoria di partenza che si sono rivelate invecchiate.
 | **1. API LLM, System Prompt, Memoria** | ✅ **Completata e verificata** | `POST /chat` con storico su Postgres, buffer + summary memory, prompt caching |
 | **2. RAG ed Embeddings** | ✅ **Completata e verificata** | Ricerca ibrida (vettori + full-text) su codice, note e doc hardware con `pgvector` |
 | **3. Function Calling e Agenti** | ✅ **Completata e verificata** | Tool Use nativo per comandi di sistema, Git, Docker ed estensioni hardware |
-| **4. Streaming, UI React & Hardware** | 🔧 **In corso** | Streaming SSE e UI React fatti e verificati; resta il deploy (Vercel + kiosk) |
+| **4. Streaming, UI React & Hardware** | 🔧 **Interfaccia chiusa, deploy aperto** | Streaming SSE, UI React e avatar reattivo fatti e verificati; resta il deploy (Vercel + kiosk) |
 
 **Verificato dal vero il 4 settembre 2026** con API key reali (Anthropic + Voyage): memoria
 conversazionale, prompt caching, ingestion di 154 chunk e ricerca ibrida funzionanti.
@@ -66,7 +66,12 @@ intenzionale, con messaggio esplicito).
 | `npm run start:dev` | Server in watch mode su :3000 |
 | `npm test` | Test unitari (nessuna dipendenza esterna, ~0.4s) |
 | `npm run test:db` | Test di integrazione (richiede `db:up`) |
-| `npm run build` | Compilazione + type-check |
+| `npm run build` | Compilazione + type-check del backend |
+| `npm run build:web` | Build del frontend in `web/dist` |
+| `npm run build:all` | Frontend + backend: dopo questo, `npm run start:prod` serve tutto sulla 3000 |
+| `npm run docker:build` / `docker:build:pi` | Immagine per `linux/amd64` / `linux/arm64` (Raspberry) |
+| `npm run docker:up` / `docker:down` | Applicazione + Postgres in container (profilo `app`) |
+| `npm run docker:migrate` | Migration dentro il container |
 
 ### Endpoint
 
@@ -75,6 +80,11 @@ intenzionale, con messaggio esplicito).
 | `POST` | `/chat` | `{ message, conversationId? }` → risposta + `usage`. Senza `conversationId` apre una nuova conversazione |
 | `GET` | `/chat/:id/messages` | Storico grezzo: ispeziona la memoria |
 | `GET` | `/chat/:id/stats` | Token, cache, costo stimato |
+| `GET` | `/health` | Liveness: il processo risponde (per HEALTHCHECK e sonde) |
+
+Se in `web/dist` c'è una build, il backend serve anche l'interfaccia sulla stessa origine: apri
+`http://localhost:3000`. Senza build parte lo stesso in modalità solo-API — in sviluppo è la
+norma, il frontend gira su Vite con il suo proxy.
 
 ---
 
@@ -313,7 +323,7 @@ perderla.
 
 ---
 
-## Fase 2: RAG ed Embeddings (senza LangChain, SQL nativo) ⬜
+## Fase 2: RAG ed Embeddings (senza LangChain, SQL nativo) ✅
 
 ### Obiettivi principali
 
@@ -664,14 +674,176 @@ in entrambe le palette.
 - `AgentService.run` è il punto in cui innestare l'emissione degli eventi: oggi accumula e
   restituisce, dovrà anche notificare.
 
-### Cosa resta
+### L'avatar: la macchina che ha una faccia (5 settembre 2026)
 
-- **Deploy**: build su Vercel con `Root Directory: web`, e il backend raggiungibile.
-- **Kiosk sul Raspberry**: Chromium a tutto schermo; da decidere se il Pi regge il backend o fa
-  solo da display verso un backend remoto (il RAG e Postgres su un Pi sono pesanti).
-- **Vercel AI SDK**: valutato dopo, ora che il protocollo lo conosciamo a fondo. Gli eventi
-  `tool_start`/`tool_end` sono nostri e andrebbero mappati sul suo formato.
-- Servire la build statica dal backend, per avere una sola origine e nessun proxy.
+| File | Ruolo |
+| --- | --- |
+| `web/src/components/Face.tsx` | L'SVG e le etichette accessibili. Nessuna logica: rende una forma e appende `data-state` |
+| `web/src/styles.css` | Tutto il movimento: sei stati, cinque keyframe, tre variabili di colore proprie |
+| `web/src/App.tsx` | `setFace(...)` dentro lo **stesso** switch che aggiorna la trascrizione |
+
+**Sei stati, e sono eventi veri**: `idle` (palpebre lente) · `reading` ← `retrieval` (lo sguardo
+scorre, tre passate) · `thinking` ← invio e `tool_end` (occhi stretti) · `working` ←
+`tool_start` (antenna che pulsa) · `speaking` ← `text` (bocca sull'onda del testo) · `error`
+(occhi piatti, colore d'allarme).
+
+La regola che tiene in piedi tutto: **la faccia non ha una macchina a stati sua.** È una lettura
+dello stesso `switch` che riempie il binario, quindi non può raccontare una cosa diversa da
+quella che sta accadendo. Un avatar con un timer proprio sarebbe tornato a essere il ciclo
+decorativo che si voleva evitare — e avrebbe finito per mentire.
+
+**SVG inline animato in CSS**, non Lottie (servirebbe un file da After Effects, cioè un binario
+opaco nel repo) né three.js (il 3D stona con l'estetica piatta da strumentazione, e pesa).
+Nitido a qualsiasi dimensione sul touchscreen del Pi, zero dipendenze, e ogni stato si controlla
+da un foglio di stile.
+
+**Ogni stato ha un tratto STATICO oltre alla sua animazione** — occhi strizzati, punta accesa,
+bocca aperta, colore d'allarme. Non è ridondanza: in fondo al foglio `prefers-reduced-motion`
+spegne *tutte* le animazioni, e uno stato che vive solo nel movimento sparirebbe del tutto
+proprio per chi ha chiesto meno movimento.
+
+Perché `reading` fa **tre passate e poi si posa**, invece di scorrere all'infinito: dopo
+`retrieval` il modello può metterci qualche secondo prima del primo token. Tre passate dicono
+"ha letto"; lo scorrimento perpetuo direbbe soltanto "sono un'animazione". Lo smorzamento è un
+conteggio finito nel CSS, nessun timer da gestire in JavaScript.
+
+### Cosa resta: due bersagli, non uno
+
+La roadmap ha sempre trattato "deploy" come un compito unico. Guardando il codice finito è
+chiaro che **portfolio e kiosk vogliono cose diverse**, e continuare a fonderli è la ragione per
+cui il punto non si chiude mai.
+
+Tre fatti verificati nel codice, che dicono da dove si parte comunque:
+
+- `web/src/api.ts` chiama `fetch('/chat/stream')` — **path relativo**. Funziona solo a origine
+  unica; in sviluppo lo salva il proxy di Vite, in produzione oggi non lo salva nessuno.
+- Nel backend non c'è né `useStaticAssets`/`ServeStaticModule` né `enableCors`: al momento
+  **nessuna** delle due configurazioni possibili è in piedi.
+- Non esiste un `Dockerfile` — solo il `docker-compose.yml` di Postgres. La build arm64 è ancora
+  sulla carta.
+
+E un fatto di sostanza, che vale più dei tre di sopra: **i tool eseguono comandi sulla macchina
+del backend.** Su un host cloud non c'è nessun repo da diffare e nessun container interessante
+da elencare, e l'agente diventa una demo di sé stesso — mentre chiunque apra il link spende la
+API key del progetto.
+
+Da qui la separazione:
+
+| Bersaglio | Forma | Perché |
+| --- | --- | --- |
+| **Portfolio (Vercel)** | Frontend statico in **modalità replay**: una sequenza di eventi SSE *veri*, catturati da una conversazione reale, riprodotta con i timing originali | Costo zero, credito zero bruciato, niente da esporre, sempre online. E mostra ciò che vale la pena mostrare: la gutter che si riempie e la faccia che cambia stato |
+| **Kiosk (Raspberry)** | Backend locale che serve la build statica, Chromium a tutto schermo, nessuna esposizione pubblica permanente | È l'installazione vera, quella in cui i tool hanno senso e l'hardware è a un cavo di distanza |
+
+La modalità replay è anche una lezione pulita, non un ripiego: se gli eventi sono un protocollo,
+il trasporto è intercambiabile — la UI non deve sapere se i frame arrivano dalla rete o da un
+file.
+
+Sul dubbio rimasto in sospeso ("il Pi regge il backend?"): un Pi 4/5 con 4 GB regge Postgres e
+l'indice HNSW su 154 chunk senza fatica — l'indice sta in pochi MB. Il collo di bottiglia sarà
+la latenza verso l'API di Anthropic, non il Pi.
+
+Lavoro in ordine:
+
+1. ✅ **Una sola origine**: il backend serve `web/dist` (fatto il 5 settembre, sotto).
+2. **Base URL configurabile** in `api.ts` (`VITE_API_BASE`, default stringa vuota = stessa
+   origine): due righe che tengono aperta la strada del frontend separato senza rifattorizzare.
+3. ✅ **Dockerfile multi-stage + `buildx` arm64** (fatto il 5 settembre, sotto). Il kiosk è
+   scritto ma **non ancora provato su un Raspberry vero**.
+4. **Modalità replay** per Vercel.
+5. **Vercel AI SDK**: valutato dopo, ora che il protocollo lo conosciamo a fondo. Gli eventi
+   `tool_start`/`tool_end` sono nostri e andrebbero mappati sul suo formato.
+
+### Una sola origine: il backend serve la SPA (5 settembre 2026)
+
+| File | Ruolo |
+| --- | --- |
+| `src/web-client.ts` | Dove sta la build, i file statici, il fallback della SPA |
+| `src/health.controller.ts` | `GET /health`, al posto dell'`AppController` dello scaffolding |
+| `src/main.ts` | Cablaggio: statici prima delle rotte, filtro dopo |
+
+**Il perché è nel client, non nel server.** `api.ts` chiama `fetch('/chat/stream')` con un path
+relativo: se la pagina arriva da un'origine e l'API vive su un'altra, quella fetch parte verso il
+posto sbagliato. Le uscite sono due — CORS (preflight, lista di origini da mantenere) oppure una
+sola origine — e la seconda fa sparire il problema invece di gestirlo. Il kiosk apre
+`localhost:3000` e trova tutto; un tunnel espone **una** porta invece di due.
+
+**`GET /` andava liberato.** L'`AppController` dello scaffolding rispondeva "Hello World!"
+proprio sul path da cui deve arrivare la pagina, e un controller su `/` vince sul fallback: la
+home avrebbe mostrato una stringa di test mentre tutto il resto funzionava — il modo peggiore di
+sbagliare, perché sembra un problema del frontend. Al suo posto `GET /health`, che nel deploy
+serve davvero (HEALTHCHECK del container, sonda del tunnel, riavvio del Pi). È di proposito una
+sonda di **liveness**: non interroga Postgres, perché una sonda che fallisce quando è il
+*database* ad avere problemi fa riavviare il processo sbagliato.
+
+**Header di cache, che sul kiosk sono il dettaglio che si paga caro.** Gli asset di Vite hanno
+l'hash del contenuto nel nome → `immutable, max-age=1y`, il browser non chiede nemmeno se sono
+cambiati. L'index invece è `no-cache`: è l'unico file che *punta* a quegli hash, e se resta in
+cache il browser continua a chiedere un bundle che non esiste più. Su uno schermo che nessuno
+ricarica a mano, quella pagina resterebbe indietro per sempre.
+
+#### Verifica dal vero (5 settembre 2026)
+
+Backend compilato su una porta separata, con la build reale del frontend:
+
+| Prova | Esito |
+| --- | --- |
+| `GET /` da browser | ✅ 200, `text/html`, `Cache-Control: no-cache` |
+| `GET /assets/index-<hash>.js` | ✅ 200, `public, max-age=31536000, immutable` |
+| Deep link inesistente da browser | ✅ 200 con la pagina (nessun 404) |
+| `GET /chat/meta` da `fetch` | ✅ 200 JSON: gli statici non intercettano le API |
+| `GET /chat/<id inesistente>/messages` | ✅ **404 JSON con il messaggio originale**, non la pagina |
+| `POST` su un path inesistente | ✅ 404 JSON |
+| `POST /chat/stream` | ✅ stream completo: `conversation → retrieval (4) → iteration → text → done` |
+
+L'ultima riga è quella che chiude il punto: la chat funziona servita dalla stessa origine che
+serve la pagina, che era tutto lo scopo dell'esercizio.
+
+### Il container, e la stessa immagine per due processori (5 settembre 2026)
+
+| File | Ruolo |
+| --- | --- |
+| `Dockerfile` | Tre stage: frontend, backend, immagine finale di sola produzione |
+| `.dockerignore` | Cosa non entra — a partire da `.env` |
+| `docker-compose.yml` | Servizio `app` dietro un profilo, accanto a Postgres |
+| `deploy/kiosk/` | Script d'avvio e autostart di Chromium sul Raspberry |
+| `deploy/README.md` | I passi, e le note che si pagano care |
+
+**`--platform=$BUILDPLATFORM` sugli stage di build.** È la riga che decide se costruire per il
+Raspberry da un PC x86 dura secondi o minuti. Senza, Docker emula un ARM intero via QEMU per far
+girare `vite` e `tsc`. Ma l'output di entrambi è **testo** — HTML, CSS, JavaScript — identico su
+qualsiasi processore: tanto vale produrlo alla velocità nativa del builder e copiarlo
+nell'immagine finale. L'emulazione serve solo all'ultimo stage, quello che installa
+`node_modules`, dove i binari devono essere quelli giusti.
+
+**`.env` fuori dall'immagine.** Un `COPY . .` senza `.dockerignore` infila la API key in un
+layer, in chiaro, dove resta per chiunque abbia l'immagine — anche cancellandola in un layer
+successivo. Le variabili si passano a runtime.
+
+**Il servizio `app` sta dietro un profilo di compose**, così `npm run db:up` continua a tirare su
+il solo Postgres: in sviluppo il backend gira sull'host in watch mode, e due backend sulla stessa
+porta danno `EADDRINUSE`. Compose sovrascrive anche `DATABASE_URL`, perché dentro il container
+`localhost:5433` significa "il container stesso": il database si raggiunge col nome del servizio.
+
+**`CMD` in forma esec, e non è pignoleria.** Con la forma shell il segnale di `docker stop` arriva
+a `/bin/sh`, Node non lo vede, gli shutdown hooks che chiudono il pool Postgres non partono e il
+container viene ucciso a forza dopo dieci secondi. Con la forma esec Node è PID 1 e riceve il
+SIGTERM direttamente — la differenza si **misura**, ed è nella tabella qui sotto.
+
+#### Verifica dal vero (5 settembre 2026)
+
+| Prova | Esito |
+| --- | --- |
+| Build `linux/amd64` | ✅ immagine da **333 MB** |
+| `GET /health` e `GET /` dal container | ✅ 200, con la SPA servita dall'immagine |
+| Turno di chat completo dal container | ✅ `text` + `done`, con Postgres nella rete di compose |
+| Utente | ✅ `node`, non root |
+| PID 1 | ✅ il processo Node (forma esec) |
+| `.env` dentro l'immagine | ✅ **assente** |
+| `docker stop` | ✅ **253 ms** — SIGTERM ricevuto, nessun kill forzato a 10s |
+| `HEALTHCHECK` | ✅ `healthy` (usa `fetch` di Node: in alpine non c'è curl) |
+| Build `linux/arm64` + avvio in emulazione | ✅ `uname -m` = **aarch64**, `/health` 200, `/` 200 |
+
+Il kiosk (`deploy/kiosk/`) è scritto ma **non provato su hardware**: serve un Raspberry acceso.
 
 ---
 
@@ -703,6 +875,13 @@ Decisioni prese confrontando i trade-off, non per default. Valgono per tutta la 
 | **Riassunto in `messages[0]`** | Riassunto nel system prompt | Il system prompt va congelato per il caching; il riassunto è contesto |
 | **Sintesi in background** | Sintesi sincrona nel turno | Evita di far attendere l'utente durante il turno di chat |
 | **UI web unificata** | UI separate web / desktop | Un'unica SPA React serve sia da portfolio online sia da display per il Raspberry |
+| **Avatar in SVG inline animato in CSS** | Lottie, three.js | Zero dipendenze, nitido sul touchscreen del Pi, ogni stato controllabile da un foglio di stile |
+| **Stati dell'avatar = eventi dello stream** | Ciclo di animazione autonomo | La faccia è strumentazione: legata agli eventi veri non può raccontare qualcosa che non sta accadendo |
+| **Portfolio in replay, backend solo sul Pi** | Istanza pubblica con backend live | I tool eseguono comandi locali: in cloud non hanno nulla da ispezionare, e il link brucerebbe la API key del progetto |
+| **Una sola origine (il backend serve la SPA)** | CORS fra due origini | Il client chiama path relativi: con l'origine unica il problema non esiste invece di essere gestito, e il kiosk espone una porta sola |
+| **`GET /health` di sola liveness** | Health che verifica anche Postgres | Una sonda che fallisce quando è il database ad avere problemi fa riavviare il processo sbagliato |
+| **Build cross-platform senza emulare** | `buildx` con QEMU su tutti gli stage | `vite` e `tsc` producono testo, uguale su ogni processore: si emula solo lo stage che installa `node_modules` |
+| **Le migration dentro l'immagine** | Applicarle da fuori | La versione dello schema che il codice si aspetta viaggia con il codice |
 
 ---
 
@@ -838,6 +1017,65 @@ dell'ingestion chiamava gli embedding una volta per file: 31 file = 31 richieste
 minuti, con la maggior parte delle richieste che trasportava poche centinaia di token.
 → Scansione di tutti i file senza rete, poi *una* chiamata con tutti i chunk, poi scrittura per
 file riassegnando i vettori per offset.
+
+**Il kiosk che parte prima di Docker mostra una pagina d'errore definitiva.** All'accensione del
+Raspberry il desktop è pronto molto prima dei container: un Chromium lanciato subito trova la
+porta chiusa e mostra "impossibile raggiungere il sito" — a tutto schermo, senza barra degli
+indirizzi per rimediare, e senza riprovare mai. È un guasto che si presenta come un guasto
+dell'applicazione mentre l'applicazione, trenta secondi dopo, sta benissimo. → Lo script del
+kiosk interroga `/health` in un ciclo prima di aprire il browser.
+
+**In Nest un middleware registrato DOPO il router non vede mai la richiesta.** Il fallback della
+SPA sembrava un caso da manuale di Express: `app.use(fallback)` dopo `app.init()`, così vede solo
+ciò che nessuna rotta ha gestito. Invece `GET /` continuava a rispondere
+`{"message":"Cannot GET /","statusCode":404}` — e quel JSON è la firma della causa: non è la
+pagina 404 di Express, è **Nest** che al termine dell'init registra un proprio handler finale e
+risponde lui. La richiesta al middleware successivo non arriva. Registrarlo *prima* dell'init lo
+metterebbe invece davanti a tutto, API comprese. → Nel modello di Nest "non ho trovato nulla" non
+è la fine della catena, è una `NotFoundException`: il posto giusto per dire "e allora dai la
+pagina" è un `ExceptionFilter` su quell'eccezione, che per costruzione entra in gioco solo dopo
+che il router ha rinunciato. Il filtro deve però **riprodurre** la risposta JSON quando non
+serve la pagina: un filtro che "quasi" gestisce l'errore lascia la richiesta appesa fino al
+timeout.
+
+**La 404 catch-all che risponde HTML alle chiamate API.** Trappola evitata di misura mentre si
+scriveva la precedente: un fallback senza guardie trasforma un 404 JSON — leggibile dal client —
+in una pagina HTML, e l'errore esce da `response.json()`, cioè lontanissimo dalla causa. → Due
+guardie sul CLIENT invece che su una lista di prefissi API (che sarebbe la stessa informazione
+scritta in due posti, e la prima a divergere): solo GET/HEAD, e solo se `Accept` contiene
+`text/html`. Il browser lo manda sempre, `fetch()` senza header no. Il prezzo, da conoscere:
+aprire *nel browser* un id inesistente su `/chat/:id/messages` dà la pagina invece del 404 JSON.
+
+**L'evento che sembra "sta pensando" cancella "sta leggendo".** Legare lo stato `thinking`
+dell'avatar all'evento `iteration` è la mossa istintiva — è letteralmente il giro di ragionamento
+dell'agente. Ma `chat.service.ts` emette `retrieval` subito prima di avviare l'agente e
+`agent.service.ts` emette `iteration` come primissima cosa del giro: i due arrivano a pochi
+millisecondi di distanza, e lo sguardo che scorre sparirebbe **prima di essere visto**. Il bug
+non è un errore, è un'animazione che "non si vede mai" e che si finisce per credere rotta.
+→ `iteration` resta un no-op nella UI; `reading` dura fino al primo `text` o `tool_start`.
+
+**Il colore-segnale del tema non vale su una superficie che il tema non tocca.** Lo schermo della
+faccia è scuro in **entrambi** i temi — è uno schermo, non una superficie. Occhi e bocca disegnati
+con `--signal` diventano quindi `#0b6e67` (teal scuro) su fondo scuro in tema chiaro: invisibili
+esattamente nella metà degli utenti. → Tre variabili proprie (`--face-screen`, `--face-glow`,
+`--face-alarm`), di cui due **identiche nei due temi**, perché il fondo su cui poggiano non cambia
+mai. La regola generale: una variabile di tema descrive una relazione con lo sfondo, e su uno
+sfondo fuori dal tema quella relazione non esiste più.
+
+**Due animazioni sullo stesso elemento si contendono `transform`, in silenzio.** Lo sguardo che
+scorre (`translateX`) e il battito di palpebre (`scaleY`) sullo stesso `<rect>`: l'ultima regola
+dichiarata vince, l'altra non parte, e nessuno lo segnala. → Transform annidate: il movimento
+orizzontale sul gruppo `.face-eyes`, lo schiacciamento sui singoli occhi. Corollario trovato
+nello stesso punto: dentro un SVG serve `transform-box: fill-box`, o l'origine dello `scaleY`
+è il centro del *viewBox* e l'occhio si schiaccia verso il bordo alto dell'immagine invece che
+su sé stesso.
+
+**Un'animazione ferma non è uno stato neutro — è un'altra immagine.** Con
+`prefers-reduced-motion` tutte le animazioni si spengono, quindi ogni fotogramma di partenza
+diventa un'immagine statica da giudicare come tale: la riga di scansione, disegnata a metà
+schermo, da ferma non si legge come un raggio spento ma come una **benda sugli occhi**. → La riga
+sta sopra gli occhi, e ogni stato ha un tratto statico oltre al movimento. Il modo di trovarli è
+attivare la preferenza e guardare i sei stati uno per uno, non immaginarseli.
 
 **Chunk minuscoli come rumore nell'indice.** `const DEFAULT_PRICE = PRICES['claude-opus-5'];`
 da solo è un chunk da 46 caratteri il cui vettore somiglia a tutte le costanti del progetto e

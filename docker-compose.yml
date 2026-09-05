@@ -20,5 +20,35 @@ services:
       timeout: 5s
       retries: 10
 
+  # L'applicazione completa (backend + interfaccia) dentro un container.
+  #
+  # Sta dietro un PROFILO perché `npm run db:up` — cioè `docker compose up -d` —
+  # deve continuare a tirare su il solo Postgres: in sviluppo l'applicazione gira
+  # sull'host con il watch, e un secondo backend sulla stessa porta darebbe
+  # EADDRINUSE. Si avvia esplicitamente con `npm run docker:up`.
+  app:
+    profiles: ['app']
+    build:
+      context: .
+    container_name: claudio-brain-app
+    restart: unless-stopped
+    # Le chiavi arrivano a runtime dal .env dell'host: nell'immagine non ce ne
+    # sono, ed è voluto (vedi .dockerignore).
+    env_file: .env
+    environment:
+      # Sovrascrive il DATABASE_URL del .env, che punta a localhost:5433 — un
+      # indirizzo che DENTRO il container significa "il container stesso".
+      # Nella rete di compose il database si chiama con il nome del servizio, e
+      # si raggiunge sulla porta interna 5432 (la 5433 è solo la mappatura verso
+      # l'host).
+      DATABASE_URL: postgres://claudio:claudio@postgres:5432/claudio_brain
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        # Non basta che il container sia partito: deve rispondere. Senza questa
+        # condizione l'applicazione parte per prima e fallisce le prime query.
+        condition: service_healthy
+
 volumes:
   claudio-brain-pgdata:
