@@ -1,0 +1,606 @@
+{
+  "recordedAt": "2026-09-05T12:35:20.836Z",
+  "meta": {
+    "tools": [
+      {
+        "name": "get_docker_status",
+        "description": "Elenca i container Docker sulla macchina di sviluppo, con immagine, stato e porte. Usalo per verificare se un servizio necessario è attivo (per esempio il Postgres di questo progetto sulla porta 5433)."
+      },
+      {
+        "name": "read_git_diff",
+        "description": "Legge le modifiche non ancora committate del repository di questo progetto (claudio-brain), oppure il contenuto dell'ultimo commit. Usalo per spiegare modifiche in corso, scrivere un messaggio di commit o fare una code review. Non può leggere altri repository né file arbitrari."
+      },
+      {
+        "name": "trigger_hardware_action",
+        "description": "Comanda l'hardware del robot collegato al Raspberry Pi: muove il servomotore, accende o spegne il LED, legge i sensori. Se il Raspberry non è configurato l'azione viene simulata e il risultato lo dichiara."
+      }
+    ],
+    "ragEnabled": true,
+    "index": [
+      {
+        "source": "code",
+        "chunks": 100,
+        "files": 41,
+        "model": "voyage-code-4"
+      },
+      {
+        "source": "docs",
+        "chunks": 54,
+        "files": 2,
+        "model": "voyage-code-4"
+      }
+    ]
+  },
+  "conversations": [
+    {
+      "question": "Il Postgres del progetto è su?",
+      "events": [
+        {
+          "afterMs": 1,
+          "event": {
+            "type": "conversation",
+            "conversationId": "3fdce9d1-72ef-41aa-8bc1-a0686b77a38a"
+          }
+        },
+        {
+          "afterMs": 448,
+          "event": {
+            "type": "retrieval",
+            "fragments": [
+              {
+                "path": "roadmap.md",
+                "lines": "15-29",
+                "symbol": "Stato del progetto",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "roadmap.md",
+                "lines": "331-353",
+                "symbol": "Cosa è stato costruito (4 settembre 2026)",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "src/database/database.service.ts",
+                "lines": "5-84",
+                "symbol": "TransactionQuery…DatabaseService",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "src/chat/messages.repository.db-spec.ts",
+                "lines": "7-146",
+                "symbol": null,
+                "foundBy": "entrambe"
+              }
+            ]
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "iteration",
+            "index": 1
+          }
+        },
+        {
+          "afterMs": 1941,
+          "event": {
+            "type": "tool_start",
+            "id": "toolu_01FfFAYv1ZiH8toDz8ZkeBnq",
+            "name": "get_docker_status",
+            "input": {
+              "all": true
+            }
+          }
+        },
+        {
+          "afterMs": 51,
+          "event": {
+            "type": "tool_end",
+            "id": "toolu_01FfFAYv1ZiH8toDz8ZkeBnq",
+            "name": "get_docker_status",
+            "isError": false,
+            "durationMs": 53,
+            "preview": "NOME\tIMMAGINE\tSTATO\tPORTE\nclaudio-brain-db\tpgvector/pgvector:pg17\tUp 40 minutes (healthy)\t0.0.0.0:5433->5432/tcp"
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "iteration",
+            "index": 2
+          }
+        },
+        {
+          "afterMs": 850,
+          "event": {
+            "type": "text",
+            "text": "Sì"
+          }
+        },
+        {
+          "afterMs": 816,
+          "event": {
+            "type": "text",
+            "text": ". `claudio-brain-db` (pgvector/pgvector:pg17) è **Up da 40 minuti, healthy**, con 5433→"
+          }
+        },
+        {
+          "afterMs": 717,
+          "event": {
+            "type": "text",
+            "text": "5432 mappata.\n\nSei a posto per `npm run test:db` e per la pipeline RAG (l'immagine è"
+          }
+        },
+        {
+          "afterMs": 611,
+          "event": {
+            "type": "text",
+            "text": " già pgvector, quindi `create extension vector` di `db/migrations/003_rag.sql` non ha problemi)."
+          }
+        },
+        {
+          "afterMs": 29,
+          "event": {
+            "type": "done",
+            "usage": {
+              "model": "claude-opus-5",
+              "inputTokens": 4,
+              "outputTokens": 193,
+              "cacheReadTokens": 6427,
+              "iterations": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "question": "Come funziona la summary memory in questo progetto?",
+      "events": [
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "conversation",
+            "conversationId": "f7b08d8a-37a2-4dd1-8647-02649056c4eb"
+          }
+        },
+        {
+          "afterMs": 15056,
+          "event": {
+            "type": "retrieval",
+            "fragments": [
+              {
+                "path": "src/chat/summary.service.ts",
+                "lines": "8-124",
+                "symbol": "SummaryService",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "roadmap.md",
+                "lines": "139-175",
+                "symbol": "Summary Memory: comprimere invece di buttare",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "src/config/memory.config.ts",
+                "lines": "12-49",
+                "symbol": "loadMemoryConfig",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "src/chat/messages.repository.ts",
+                "lines": "86-100",
+                "symbol": "MessagesRepository.getMemory",
+                "foundBy": "entrambe"
+              }
+            ]
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "iteration",
+            "index": 1
+          }
+        },
+        {
+          "afterMs": 2087,
+          "event": {
+            "type": "text",
+            "text": "La logica sta in `src/chat/summary.service.ts:8-124`, con la config"
+          }
+        },
+        {
+          "afterMs": 715,
+          "event": {
+            "type": "text",
+            "text": " validata in `src/config/memory.config.ts:12-49`.\n\n**Il flusso**\n\n```\nmessaggi non riassunti > SUMMARY_TRIGGER (20)\n   → comprimi"
+          }
+        },
+        {
+          "afterMs": 642,
+          "event": {
+            "type": "text",
+            "text": " tutti tranne gli ultimi SUMMARY_KEEP_RECENT (8)\n   → salva riassunto + confine (summary_through_message_id)\nturno successivo: [riassunto] + ["
+          }
+        },
+        {
+          "afterMs": 766,
+          "event": {
+            "type": "text",
+            "text": "messaggi dopo il confine]\n```\n\n`maybeSummarize()` è idempotente: legge lo stato via `getMemory()` (`src/chat/messages.repository."
+          }
+        },
+        {
+          "afterMs": 742,
+          "event": {
+            "type": "text",
+            "text": "ts:86`), prende i messaggi dopo il confine e se non superano la soglia esce subito senza costare niente. Pu"
+          }
+        },
+        {
+          "afterMs": 610,
+          "event": {
+            "type": "text",
+            "text": "oi chiamarla ad ogni turno.\n\n**Le quattro decisioni che contano**\n\n1. **Rolling, non a cascata.** Il riassunto precedente rientra nel prompt come mater"
+          }
+        },
+        {
+          "afterMs": 824,
+          "event": {
+            "type": "text",
+            "text": "iale da *preservare*, non da riaccorciare — vedi `buildSummaryPrompt` in `src/chat/summary.service.ts`, dove le istruzioni d"
+          }
+        },
+        {
+          "afterMs": 614,
+          "event": {
+            "type": "text",
+            "text": "icono esplicitamente di conservare TUTTI i fatti già presenti. Ricomprimere un riassunto erode informazione: dopo cinque giri non res"
+          }
+        },
+        {
+          "afterMs": 717,
+          "event": {
+            "type": "text",
+            "text": "ta nulla.\n\n2. **Il confine (`summary_through_message_id`)** evita di pagare due volte lo stesso contenuto: una compresso nel"
+          }
+        },
+        {
+          "afterMs": 717,
+          "event": {
+            "type": "text",
+            "text": " riassunto, una testuale nella finestra.\n\n3. **Il riassunto va in `messages[0]`, non nel system prompt.** Il system prompt deve restare congelato per il caching, e un riassunto è *"
+          }
+        },
+        {
+          "afterMs": 717,
+          "event": {
+            "type": "text",
+            "text": "contesto*, non *istruzione*.\n\n4. **Modello economico per un compito meccanico.** Haiku (`ANTHROPIC_SUMMARY_MODEL`,"
+          }
+        },
+        {
+          "afterMs": 717,
+          "event": {
+            "type": "text",
+            "text": " default `claude-haiku-4-5`), `effort: 'low'`, `maxTokens: 2000`, `cache: false` — il prompt cambia ogni volta, pagheresti la scrittura della"
+          }
+        },
+        {
+          "afterMs": 716,
+          "event": {
+            "type": "text",
+            "text": " cache senza rileggerla mai.\n\n**L'invariante da non violare**\n\n```\nSUMMARY_KEEP_RECENT  <  SUMMARY_TRIGGER  <=  HISTORY_WINDOW\n```\n\nSe il trigger super"
+          }
+        },
+        {
+          "afterMs": 718,
+          "event": {
+            "type": "text",
+            "text": "asse la finestra, i messaggi in mezzo non starebbero né nel riassunto né nella finestra: sparirebbero in silenzio. `loadMemoryConfig` f"
+          }
+        },
+        {
+          "afterMs": 717,
+          "event": {
+            "type": "text",
+            "text": "a throw all'avvio invece di lasciarti scoprire il bug tre settimane dopo. Seconda dif"
+          }
+        },
+        {
+          "afterMs": 613,
+          "event": {
+            "type": "text",
+            "text": "esa nel SQL: `findRecentMessagesAfter` prende gli **ultimi** N, non i primi — se la sintesi fallisse ripetutamente, prendere i primi but"
+          }
+        },
+        {
+          "afterMs": 206,
+          "event": {
+            "type": "text",
+            "text": "terebbe via la domanda appena arrivata."
+          }
+        },
+        {
+          "afterMs": 42,
+          "event": {
+            "type": "done",
+            "usage": {
+              "model": "claude-opus-5",
+              "inputTokens": 2,
+              "outputTokens": 958,
+              "cacheReadTokens": 0,
+              "iterations": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "question": "Muovi il servomotore a 90 gradi",
+      "events": [
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "conversation",
+            "conversationId": "d83c4211-4a76-4ff7-84b6-34dcc69b5b3f"
+          }
+        },
+        {
+          "afterMs": 6907,
+          "event": {
+            "type": "retrieval",
+            "fragments": [
+              {
+                "path": "src/llm/llm.service.ts",
+                "lines": "113-218",
+                "symbol": "LlmService.complete",
+                "foundBy": "semantica"
+              },
+              {
+                "path": "src/llm/llm.service.ts",
+                "lines": "89-111",
+                "symbol": "LlmService.logger…constructor",
+                "foundBy": "semantica"
+              },
+              {
+                "path": "src/chat/chat.service.ts",
+                "lines": "55-166",
+                "symbol": "ChatService.sendMessage",
+                "foundBy": "semantica"
+              },
+              {
+                "path": "src/rag/chunking/typescript.chunker.ts",
+                "lines": "263-283",
+                "symbol": "extractDeclaration",
+                "foundBy": "semantica"
+              }
+            ]
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "iteration",
+            "index": 1
+          }
+        },
+        {
+          "afterMs": 2038,
+          "event": {
+            "type": "tool_start",
+            "id": "toolu_012Fi2aemFm3vQtzaj7WSKpL",
+            "name": "trigger_hardware_action",
+            "input": {
+              "action": "servo_move",
+              "angle": 90
+            }
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "tool_end",
+            "id": "toolu_012Fi2aemFm3vQtzaj7WSKpL",
+            "name": "trigger_hardware_action",
+            "isError": false,
+            "durationMs": 1,
+            "preview": "SIMULATO (Raspberry Pi non configurato): azione \"servo_move\" con angolo 90° sarebbe stata eseguita. Imposta HARDWARE_WEBHOOK_URL per comandare l'hardware reale."
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "iteration",
+            "index": 2
+          }
+        },
+        {
+          "afterMs": 918,
+          "event": {
+            "type": "text",
+            "text": "**"
+          }
+        },
+        {
+          "afterMs": 714,
+          "event": {
+            "type": "text",
+            "text": "Il servo non si è mosso.** L'azione è stata solo simulata: il Raspberry non è configurato.\n\nPer comandare l'hardware reale dev"
+          }
+        },
+        {
+          "afterMs": 717,
+          "event": {
+            "type": "text",
+            "text": "i impostare `HARDWARE_WEBHOOK_URL` nel `.env` con l'endpoint esposto dal Pi, poi riprova.\n\n(I frammenti RAG all"
+          }
+        },
+        {
+          "afterMs": 512,
+          "event": {
+            "type": "text",
+            "text": "egati — LlmService/ChatService/chunker — non c'entrano con questa richiesta.)"
+          }
+        },
+        {
+          "afterMs": 31,
+          "event": {
+            "type": "done",
+            "usage": {
+              "model": "claude-opus-5",
+              "inputTokens": 4,
+              "outputTokens": 226,
+              "cacheReadTokens": 6571,
+              "iterations": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "question": "Controlla i container e intanto porta il servo a 45 gradi",
+      "events": [
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "conversation",
+            "conversationId": "00f73909-d419-44f0-8f8d-69f73c0db50b"
+          }
+        },
+        {
+          "afterMs": 15236,
+          "event": {
+            "type": "retrieval",
+            "fragments": [
+              {
+                "path": "src/rag/voyage.embedding.provider.ts",
+                "lines": "126-152",
+                "symbol": "VoyageEmbeddingProvider.throttle",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "roadmap.md",
+                "lines": "232-247",
+                "symbol": "Correzione importante alla teoria di partenza",
+                "foundBy": "entrambe"
+              },
+              {
+                "path": "src/rag/rag.repository.db-spec.ts",
+                "lines": "35-218",
+                "symbol": null,
+                "foundBy": "full-text"
+              },
+              {
+                "path": "src/llm/llm.service.ts",
+                "lines": "113-218",
+                "symbol": "LlmService.complete",
+                "foundBy": "semantica"
+              }
+            ]
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "iteration",
+            "index": 1
+          }
+        },
+        {
+          "afterMs": 2320,
+          "event": {
+            "type": "tool_start",
+            "id": "toolu_01Qs27RvCnKK6FZKE5n2DJ1p",
+            "name": "get_docker_status",
+            "input": {
+              "all": true
+            }
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "tool_start",
+            "id": "toolu_0164xfZwWz1REUQa5AmdtD7g",
+            "name": "trigger_hardware_action",
+            "input": {
+              "action": "servo_move",
+              "angle": 45
+            }
+          }
+        },
+        {
+          "afterMs": 47,
+          "event": {
+            "type": "tool_end",
+            "id": "toolu_01Qs27RvCnKK6FZKE5n2DJ1p",
+            "name": "get_docker_status",
+            "isError": false,
+            "durationMs": 49,
+            "preview": "NOME\tIMMAGINE\tSTATO\tPORTE\nclaudio-brain-db\tpgvector/pgvector:pg17\tUp 41 minutes (healthy)\t0.0.0.0:5433->5432/tcp"
+          }
+        },
+        {
+          "afterMs": 1,
+          "event": {
+            "type": "tool_end",
+            "id": "toolu_0164xfZwWz1REUQa5AmdtD7g",
+            "name": "trigger_hardware_action",
+            "isError": false,
+            "durationMs": 0,
+            "preview": "SIMULATO (Raspberry Pi non configurato): azione \"servo_move\" con angolo 45° sarebbe stata eseguita. Imposta HARDWARE_WEBHOOK_URL per comandare l'hardware reale."
+          }
+        },
+        {
+          "afterMs": 0,
+          "event": {
+            "type": "iteration",
+            "index": 2
+          }
+        },
+        {
+          "afterMs": 975,
+          "event": {
+            "type": "text",
+            "text": "**"
+          }
+        },
+        {
+          "afterMs": 708,
+          "event": {
+            "type": "text",
+            "text": "Docker**: solo `claudio-brain-db` (pgvector/pgvector:pg17), up da 41 minuti, healthy, su `0.0.0.0:"
+          }
+        },
+        {
+          "afterMs": 718,
+          "event": {
+            "type": "text",
+            "text": "5433->5432`. Nessun altro container, nemmeno fermo.\n\n**Servo**: non si è mosso. Risposta **SIMULATO** —"
+          }
+        },
+        {
+          "afterMs": 415,
+          "event": {
+            "type": "text",
+            "text": " il Raspberry Pi non è configurato. Serve `HARDWARE_WEBHOOK_URL` nell'env per comandare l'hardware reale."
+          }
+        },
+        {
+          "afterMs": 34,
+          "event": {
+            "type": "done",
+            "usage": {
+              "model": "claude-opus-5",
+              "inputTokens": 4,
+              "outputTokens": 299,
+              "cacheReadTokens": 7503,
+              "iterations": 2
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

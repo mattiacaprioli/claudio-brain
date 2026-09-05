@@ -38,6 +38,34 @@ L'applicazione sta dietro un **profilo** perché `npm run db:up` deve continuare
 solo Postgres: in sviluppo il backend gira sull'host in watch mode, e due backend sulla stessa
 porta darebbero `EADDRINUSE`.
 
+## La vetrina su Vercel (demo registrata)
+
+La vetrina non ha un backend, e non è una limitazione da nascondere: i tool eseguono comandi
+sulla macchina, in cloud non avrebbero nulla da ispezionare, e un link pubblico brucerebbe la API
+key a chiunque passi. Quindi la pagina **riproduce eventi veri**, catturati da conversazioni
+reali.
+
+```bash
+npm run demo:record        # cattura contro un backend vivo (default localhost:3000)
+npm --prefix web run build:demo
+```
+
+Il registratore scrive `web/src/demo/recordings.json`: gli eventi dello stream con i tempi
+misurati, più l'inventario di `/chat/meta` — che nella demo non esiste, e senza il quale la
+schermata iniziale sarebbe mutilata proprio dove elenca di cosa Claudio è capace.
+
+Su Vercel: **Root Directory `web`**. Il resto lo dice `web/vercel.json` — build command
+`npm run build:demo` e la rewrite di ogni path su `index.html`, che è il fallback della SPA nella
+versione di Vercel (in casa lo fa il backend).
+
+Cosa cambia in modalità demo: un bollino "registrata" nell'intestazione, la dichiarazione in
+chiaro nella schermata iniziale, e le domande proposte sono **solo** quelle registrate. Chi ne
+scrive un'altra riceve una nota che lo spiega — non un errore, e soprattutto non una risposta
+inventata: in una pagina fatta di eventi veri, sarebbe l'unica bugia.
+
+Per rinfrescare la vetrina dopo un cambiamento sostanziale basta rilanciare `demo:record`: le
+risposte sono quelle del modello di oggi, non testo scritto a mano che invecchia da solo.
+
 ## Il kiosk sul Raspberry
 
 Presupposto: Raspberry Pi OS **con desktop**, Docker installato, il progetto in

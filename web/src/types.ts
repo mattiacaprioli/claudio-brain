@@ -65,6 +65,12 @@ export interface Turn {
   tools?: ToolActivity[];
   usage?: Usage;
   error?: string;
+  /**
+   * Un avviso della UI, non del modello: in modalità demo dice che la domanda
+   * non è fra quelle registrate. Sta separato da `error` perché non è un
+   * guasto, e colorarlo come tale sarebbe una diagnosi sbagliata.
+   */
+  note?: string;
   /** true mentre il testo sta ancora arrivando. */
   streaming?: boolean;
 }

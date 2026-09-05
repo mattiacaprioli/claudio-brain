@@ -12,10 +12,12 @@ export function Composer({
   onSend,
   onStop,
   busy,
+  placeholder = 'Chiedi qualcosa a Claudio',
 }: {
   onSend: (message: string) => void;
   onStop: () => void;
   busy: boolean;
+  placeholder?: string;
 }) {
   const [value, setValue] = useState('');
   const area = useRef<HTMLTextAreaElement>(null);
@@ -39,9 +41,16 @@ export function Composer({
       <textarea
         ref={area}
         className="composer-input"
+        // Il campo non ha un'etichetta visibile — l'interfaccia è una sola
+        // casella e una didascalia sarebbe rumore — quindi il nome deve
+        // arrivare da qui, o chi usa uno screen reader trova "casella di
+        // testo" e basta. `name` serve invece al browser (autofill, e i
+        // controlli che segnalano i campi anonimi).
+        name="messaggio"
+        aria-label="Messaggio per Claudio"
         value={value}
         rows={1}
-        placeholder="Chiedi qualcosa a Claudio"
+        placeholder={placeholder}
         onChange={(event) => {
           setValue(event.target.value);
           const element = event.target;

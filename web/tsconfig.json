@@ -10,7 +10,12 @@
     "noEmit": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    // I tipi di Vite: senza, `import.meta.env` non esiste per TypeScript e la
+    // modalità demo non compila. Portano anche `resolveJsonModule`, che serve
+    // a importare le registrazioni.
+    "types": ["vite/client"],
+    "resolveJsonModule": true
   },
   "include": ["src", "vite.config.ts"]
 }

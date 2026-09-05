@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:demo": "tsc -b && VITE_REPLAY=1 vite build"
   },
   "dependencies": {
     "highlight.js": "^11.11.1",

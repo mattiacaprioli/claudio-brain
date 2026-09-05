@@ -11,6 +11,7 @@
     "build:web": "npm --prefix web run build",
     "build:all": "npm run build:web && npm run build",
     "deploy": "nest deploy",
+    "demo:record": "node scripts/record-demo.ts",
     "docker:build": "docker build -t claudio-brain:local .",
     "docker:build:pi": "docker buildx build --platform linux/arm64 -t claudio-brain:pi --load .",
     "docker:up": "docker compose --profile app up -d --build",

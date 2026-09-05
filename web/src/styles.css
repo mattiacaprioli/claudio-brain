@@ -154,13 +154,36 @@ body {
   color: var(--ink-faint);
 }
 
-.conversation-id {
+.header-meta {
   grid-column: 2;
   justify-self: start;
   align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.conversation-id {
   font-family: var(--mono);
   font-size: 0.7rem;
   color: var(--ink-faint);
+}
+
+/* Il bollino della demo: dice che gli eventi sono registrati, e lo dice una
+   volta sola in un punto fisso. Usa `--signal` come tutta la strumentazione —
+   è un'informazione di stato della macchina, non un avviso: `--alert` la
+   farebbe leggere come "qualcosa non va", che è il contrario del vero (qui
+   funziona tutto, semplicemente il backend è altrove). */
+.demo-badge {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--signal);
+  border-radius: 999px;
+  background: var(--signal-wash);
+  color: var(--signal);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 /* ---------- La faccia -------------------------------------------------- */
@@ -403,7 +426,8 @@ body {
 
 .turn-assistant .prose,
 .turn-assistant .measures,
-.turn-assistant .failure {
+.turn-assistant .failure,
+.turn-assistant .note {
   grid-column: 2;
   max-width: var(--prose);
 }
@@ -666,6 +690,46 @@ body {
   background: var(--surface);
   color: var(--alert);
   font-size: 0.9rem;
+}
+
+/* La nota della demo. Stessa forma del blocco d'errore — bordo a sinistra,
+   superficie staccata — ma nel colore-segnale: è la UI che spiega una regola
+   del gioco, non un guasto. Distinguerli conta: se una domanda senza
+   registrazione si presentasse in rosso, chi guarda penserebbe che il progetto
+   sia rotto proprio mentre lo sta valutando. */
+.note {
+  margin: 0.5rem 0 0;
+  padding: 0.7rem 0.9rem 0.2rem;
+  border-left: 2px solid var(--signal);
+  background: var(--surface);
+}
+
+.note p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.note .examples {
+  border-top: none;
+  margin-top: 0.4rem;
+}
+
+/* Dentro il riquadro l'ultima riga non ha bisogno del suo filo: il bordo del
+   riquadro è già la chiusura, e due linee a un pixel di distanza si leggono
+   come un errore di allineamento. */
+.note .examples li:last-child button {
+  border-bottom: none;
+}
+
+/* Il paragrafo che dichiara la registrazione nello stato vuoto: sta nel flusso
+   del testo, non in un riquadro. Un avviso incorniciato si legge come una
+   scusa; una riga di testo si legge come un fatto. */
+.demo-nota {
+  border-left: 2px solid var(--rule);
+  padding-left: 0.9rem;
+  font-size: 0.88rem;
 }
 
 /* Le misure a chiusura della risposta: si leggono come lo scontrino di uno

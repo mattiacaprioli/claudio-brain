@@ -72,6 +72,8 @@ intenzionale, con messaggio esplicito).
 | `npm run docker:build` / `docker:build:pi` | Immagine per `linux/amd64` / `linux/arm64` (Raspberry) |
 | `npm run docker:up` / `docker:down` | Applicazione + Postgres in container (profilo `app`) |
 | `npm run docker:migrate` | Migration dentro il container |
+| `npm run demo:record` | Cattura conversazioni vere per la vetrina (serve un backend vivo) |
+| `npm --prefix web run build:demo` | Build della vetrina in modalità registrata |
 
 ### Endpoint
 
@@ -749,7 +751,8 @@ Lavoro in ordine:
    origine): due righe che tengono aperta la strada del frontend separato senza rifattorizzare.
 3. ✅ **Dockerfile multi-stage + `buildx` arm64** (fatto il 5 settembre, sotto). Il kiosk è
    scritto ma **non ancora provato su un Raspberry vero**.
-4. **Modalità replay** per Vercel.
+4. ✅ **Modalità replay** per Vercel (fatta il 5 settembre, sotto). Resta il deploy vero e
+   proprio: collegare il repository a Vercel con `Root Directory: web`.
 5. **Vercel AI SDK**: valutato dopo, ora che il protocollo lo conosciamo a fondo. Gli eventi
    `tool_start`/`tool_end` sono nostri e andrebbero mappati sul suo formato.
 
@@ -845,6 +848,50 @@ SIGTERM direttamente — la differenza si **misura**, ed è nella tabella qui so
 
 Il kiosk (`deploy/kiosk/`) è scritto ma **non provato su hardware**: serve un Raspberry acceso.
 
+### La vetrina: eventi veri, riprodotti (5 settembre 2026)
+
+| File | Ruolo |
+| --- | --- |
+| `scripts/record-demo.ts` | Cattura conversazioni vere e le salva con i tempi (`npm run demo:record`) |
+| `web/src/demo/recordings.json` | Quattro conversazioni reali + l'inventario di `/chat/meta` |
+| `web/src/demo/replay.ts` | Le riproduce, con la stessa firma di `streamChat` |
+| `web/src/transport.ts` | L'unico punto che sceglie fra rete e registrazione |
+| `web/vercel.json` | Build della demo e fallback della SPA su Vercel |
+
+**L'idea che la rende una lezione e non un ripiego**: se gli eventi sono un protocollo, il
+trasporto è intercambiabile. `replayChat` ha la stessa identica firma di `streamChat`, la scelta
+si fa in un unico modulo, e nel flusso di `App.tsx` non esiste nessun `if (demo)`. La UI non sa —
+e non deve sapere — se i frame arrivano da `fetch` o da un file.
+
+**Sono eventi VERI.** Catturati dal backend con i tempi realmente misurati, non risposte scritte
+a mano che imitano un modello. Si rinfrescano rilanciando un comando, quindi non invecchiano da
+sole. Nella vetrina si vede quindi il RAG che trova i frammenti, due tool eseguiti in parallelo
+con le durate reali (49 ms e 0 ms), i token letti da cache, e la risposta in cui Claudio dichiara
+che il servo **non** si è mosso perché la chiamata era simulata.
+
+**L'unica cosa che non è com'era, ed è dichiarata in pagina**: le pause oltre 1,8 s sono
+accorciate. Le vere arrivano a quindici secondi — è il tempo in cui il modello ragiona prima del
+primo token, ed è onesto, ma davanti a una vetrina quindici secondi di faccia che pensa si
+leggono come una pagina rotta.
+
+**La domanda fuori elenco riceve una nota, non un errore e non una risposta finta.** Il campo di
+scrittura resta attivo di proposito (disabilitarlo sembra una UI guasta, e chi guarda un
+portfolio prova a scrivere), il placeholder avvisa prima, e chi ci prova comunque ottiene la
+spiegazione più le domande disponibili. Inventare una risposta sarebbe stata l'unica bugia
+possibile in una pagina fatta di eventi veri.
+
+#### Verifica dal vero (5 settembre 2026)
+
+| Prova | Esito |
+| --- | --- |
+| Registrazione di 4 conversazioni | ✅ 11–21 eventi ciascuna, 18 KB in totale |
+| Vetrina: schermata iniziale | ✅ bollino, dichiarazione, inventario dai dati registrati |
+| Vetrina: riproduzione di un turno con due tool | ✅ frammenti, tool con durate, misure finali |
+| Vetrina: domanda non registrata | ✅ nota con le domande, nessun errore rosso |
+| Bundle del kiosk | ✅ **nessuna traccia** delle registrazioni (370 KB contro 380) |
+| Modalità normale col backend vero | ✅ invariata: nessun bollino, streaming reale funzionante |
+| Console del browser | ✅ nessun errore |
+
 ---
 
 ## Sintesi del percorso tecnologico
@@ -882,6 +929,8 @@ Decisioni prese confrontando i trade-off, non per default. Valgono per tutta la 
 | **`GET /health` di sola liveness** | Health che verifica anche Postgres | Una sonda che fallisce quando è il database ad avere problemi fa riavviare il processo sbagliato |
 | **Build cross-platform senza emulare** | `buildx` con QEMU su tutti gli stage | `vite` e `tsc` producono testo, uguale su ogni processore: si emula solo lo stage che installa `node_modules` |
 | **Le migration dentro l'immagine** | Applicarle da fuori | La versione dello schema che il codice si aspetta viaggia con il codice |
+| **Vetrina che riproduce eventi registrati** | Backend di demo in cloud, o risposte finte scritte a mano | Stesso protocollo, trasporto diverso: zero costi e zero rischi, e gli eventi restano quelli veri |
+| **Scelta del trasporto a build time** | Un `if (demo)` sparso nei componenti | Un solo punto che sceglie, e il ramo non scelto esce dal bundle |
 
 ---
 
@@ -1017,6 +1066,24 @@ dell'ingestion chiamava gli embedding una volta per file: 31 file = 31 richieste
 minuti, con la maggior parte delle richieste che trasportava poche centinaia di token.
 → Scansione di tutti i file senza rete, poi *una* chiamata con tutti i chunk, poi scrittura per
 file riassegnando i vettori per offset.
+
+**Un `.map()` a livello di modulo impedisce il tree-shaking, e la promessa nel commento era
+falsa.** Il ramo della demo doveva sparire dal bundle del kiosk: il commento lo dichiarava, la
+misura diceva il contrario — le registrazioni erano lì. Due cause in fila, e nessuna dà errore.
+(1) Vite sostituisce `import.meta.env.VITE_X` con un letterale **solo se la variabile è
+definita**: quando non lo è, resta un accesso a un oggetto, e Rollup non può dimostrare che il
+ramo è morto. → `define` in `vite.config.ts`, sempre, anche a vuoto. (2) Anche così il modulo
+restava, perché `export const x = DATI.conversations.map(...)` **esegue** quel `map` al
+caricamento: per Rollup è un effetto collaterale da preservare. → Le costanti calcolate
+diventano funzioni. Risultato misurato: 380 → 370 KB e zero occorrenze del contenuto registrato
+nel file prodotto. La lezione che vale oltre il caso: **un commento che promette un'ottimizzazione
+va verificato come si verifica un test**, o diventa documentazione di qualcosa che non accade.
+
+**Il blocco messo nella colonna sbagliata della griglia si nota solo guardando.** La nota della
+demo era corretta in tutto tranne che nel posto: senza `grid-column: 2` è finita nella gutter,
+strizzata a metà larghezza. Nessun errore, nessun test rosso — la griglia a due colonne assegna
+la prima per default. → Vale la regola già scritta per `.failure`; e vale il metodo: gli
+screenshot degli stati nuovi si guardano, uno per uno.
 
 **Il kiosk che parte prima di Docker mostra una pagina d'errore definitiva.** All'accensione del
 Raspberry il desktop è pronto molto prima dei container: un Chromium lanciato subito trova la

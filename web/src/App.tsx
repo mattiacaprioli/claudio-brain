@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchMeta, streamChat } from './api';
 import { Composer } from './components/Composer';
 import { Face, type FaceState } from './components/Face';
 import { Rail } from './components/Rail';
 import { renderMarkdown } from './markdown';
+import {
+  ESEMPI,
+  isReplay,
+  loadMeta,
+  RegistrazioneMancante,
+  registratoIl,
+  streamMessage,
+} from './transport';
 import type { ChatStreamEvent, Meta, Turn } from './types';
-
-const ESEMPI = [
-  'Il Postgres del progetto è su?',
-  'Cosa ho modificato e non ho ancora committato?',
-  'Come funziona la summary memory in questo progetto?',
-  'Muovi il servomotore a 90 gradi',
-];
 
 export default function App() {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -28,7 +28,7 @@ export default function App() {
   // L'inventario è dato reale, non testo scritto a mano: se domani si
   // aggiunge uno strumento, la schermata iniziale lo annuncia da sé.
   useEffect(() => {
-    void fetchMeta()
+    void loadMeta()
       .then(setMeta)
       .catch(() => setMeta(undefined));
   }, []);
@@ -132,9 +132,19 @@ export default function App() {
     abort.current = controller;
 
     try {
-      await streamChat({ message, conversationId }, handleEvent, controller.signal);
+      await streamMessage({ message, conversationId }, handleEvent, controller.signal);
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (error instanceof RegistrazioneMancante) {
+        // Non è un guasto, ed è importante che non lo sembri: in demo la
+        // domanda libera non ha una risposta registrata. Inventarne una
+        // sarebbe l'unica bugia possibile in una pagina fatta di eventi veri.
+        patchLast((turn) => ({
+          ...turn,
+          note: 'Questa è una demo registrata: posso riprodurre solo le conversazioni catturate dal backend vero. Provane una:',
+          streaming: false,
+        }));
+        setFace('idle');
+      } else if (!controller.signal.aborted) {
         patchLast((turn) => ({
           ...turn,
           error: (error as Error).message,
@@ -161,14 +171,31 @@ export default function App() {
           <Face state={face} />
           <div className="identity-text">
             <h1 className="brand">claudio</h1>
-            <p className="brand-note">assistente locale del progetto</p>
+            <p className="brand-note">
+              {isReplay
+                ? 'demo registrata · il backend gira sul robot'
+                : 'assistente locale del progetto'}
+            </p>
           </div>
         </div>
-        {conversationId ? (
-          <span className="conversation-id" title="Id della conversazione">
-            {conversationId.slice(0, 8)}
-          </span>
-        ) : null}
+        {/* Badge e id stanno nello stesso contenitore perché occupano la
+            stessa cella della griglia: due elementi con `justify-self: start`
+            in colonna 2 si sovrapporrebbero. */}
+        <div className="header-meta">
+          {isReplay ? (
+            <span
+              className="demo-badge"
+              title={`Eventi catturati da conversazioni reali il ${new Date(registratoIl()).toLocaleDateString('it-IT')}. Le pause più lunghe di 1,8 s sono accorciate.`}
+            >
+              registrata
+            </span>
+          ) : null}
+          {conversationId ? (
+            <span className="conversation-id" title="Id della conversazione">
+              {conversationId.slice(0, 8)}
+            </span>
+          ) : null}
+        </div>
       </header>
 
       <main className="transcript">
@@ -207,6 +234,16 @@ export default function App() {
                 controlla lo stato dell'ambiente di sviluppo e comanda l'hardware
                 del robot. Ogni passo che compie resta visibile qui a sinistra.
               </p>
+              {isReplay ? (
+                <p className="demo-nota">
+                  Il backend vive sul robot e non è esposto su internet: questa
+                  pagina <strong>riproduce eventi reali</strong>, catturati da
+                  conversazioni vere il{' '}
+                  {new Date(registratoIl()).toLocaleDateString('it-IT')}, con i
+                  tempi misurati allora. Le pause più lunghe di 1,8 s sono
+                  accorciate — è l'unica cosa che non è com'era.
+                </p>
+              ) : null}
               <ul className="examples">
                 {ESEMPI.map((esempio) => (
                   <li key={esempio}>
@@ -239,6 +276,21 @@ export default function App() {
                 ) : null}
               </div>
 
+              {turn.note ? (
+                <div className="note">
+                  <p>{turn.note}</p>
+                  <ul className="examples">
+                    {ESEMPI.map((esempio) => (
+                      <li key={esempio}>
+                        <button type="button" onClick={() => void send(esempio)}>
+                          {esempio}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
               {turn.error ? <p className="failure">{turn.error}</p> : null}
 
               {turn.usage ? (
@@ -261,6 +313,15 @@ export default function App() {
         onSend={(message) => void send(message)}
         onStop={() => abort.current?.abort()}
         busy={busy}
+        // In demo la casella resta scrivibile di proposito: disabilitarla
+        // sembrerebbe una UI rotta, e chi guarda un portfolio prova a
+        // scrivere. Il placeholder dice come stanno le cose PRIMA che ci
+        // provi, e chi ci prova comunque riceve una nota, non un errore.
+        placeholder={
+          isReplay
+            ? 'Demo registrata: scegli una delle domande qui sopra'
+            : undefined
+        }
       />
     </div>
   );
