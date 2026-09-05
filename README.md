@@ -1,114 +1,155 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Claudio
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Un assistente IA che legge il mio codice, ispeziona il mio ambiente di sviluppo e comanda
+l'hardware di un robot. Costruito da zero — senza LangChain, senza ORM, senza framework di
+orchestrazione — per capire davvero come funzionano gli agenti IA invece di assemblarli.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+**Ogni passo che l'assistente compie resta visibile**: quali file ha letto, quale metà della
+ricerca ibrida li ha trovati, quale comando ha eseguito e in quanti millisecondi, quanti token
+sono arrivati dalla cache. In quasi tutte le interfacce conversazionali la macchina è nascosta;
+qui è il soggetto.
 
-## Description
+```
+tu   Il Postgres del progetto è su? E muovi il servo a 45 gradi.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+     ▪▪ roadmap.md:15-29                 Sì: claudio-brain-db (pgvector/pgvector:pg17)
+     ▪▪ src/rag/rag.repository.ts:44     è up da 6 ore, healthy, su 0.0.0.0:5433.
+     esegue get_docker_status  74 ms
+     esegue trigger_hardware…   0 ms     Il servo non si è mosso: la chiamata è stata
+                                         SIMULATA perché il Raspberry non è configurato.
 
-## Project setup
-
-```bash
-$ npm install
+                                         290 token generati · 6251 letti da cache · 2 giri
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+## Cosa fa
 
-# watch mode
-$ npm run start:dev
+| | |
+| --- | --- |
+| **Memoria conversazionale** | Storico su Postgres, finestra degli ultimi N messaggi e riassunto *rolling* di ciò che esce dalla finestra |
+| **Ricerca ibrida** | Vettori (`pgvector`, HNSW) **e** full-text (`tsvector`) fusi con Reciprocal Rank Fusion, su codice e documentazione locali |
+| **Agente con strumenti** | Legge il `git diff`, interroga Docker, comanda servomotore e LED di un Raspberry Pi |
+| **Streaming** | Server-Sent Events: il testo arriva parola per parola e gli strumenti si vedono lavorare mentre lavorano |
+| **Contabilità** | Token, cache e costo stimato per conversazione, esposti dall'API e mostrati nell'interfaccia |
 
-# production mode
-$ npm run start:prod
+## Perché è costruito così
+
+Le decisioni che contano, con l'alternativa scartata:
+
+- **Niente LangChain.** Il RAG è SQL: `ORDER BY embedding <=> $1` con un indice HNSW e un
+  `tsvector` accanto. Un framework avrebbe nascosto proprio la parte da imparare.
+- **Niente ORM.** Le query sono scritte a mano, così ogni `SELECT` è leggibile e ottimizzabile.
+- **Loop dell'agente manuale**, non il tool runner dell'SDK: sono trenta righe, e sono *le*
+  righe che distinguono un chatbot da un agente.
+- **Ricerca ibrida e non solo vettoriale.** Gli embedding sbagliano proprio dove serve di più:
+  cerca `findRecentMessagesAfter` e la similarità coseno ti restituisce tre funzioni che *le
+  somigliano*. Il full-text trova la stringa esatta; la fusione prende il meglio dei due.
+
+## Architettura
+
+```
+web/           React + Vite. Client SSE, renderer Markdown senza innerHTML.
+src/
+  chat/        Il turno di conversazione, la memoria, il loop dell'agente.
+  llm/         L'unico punto che parla con Anthropic. System prompt inclusi.
+  rag/         Chunking guidato dall'AST, embeddings, ricerca ibrida.
+  tools/       Strumenti dell'agente ed esecuzione sicura dei comandi.
+  database/    Pool di connessioni e transazioni.
+db/migrations/ Schema, in SQL semplice.
 ```
 
-## Run tests
+Il giro di un turno:
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+```
+1. Risolvi la conversazione       id assente → nuova; id inesistente → 404
+2. Salva la domanda               PRIMA di chiamare il modello
+3. Leggi la memoria               riassunto + ultimi N messaggi non riassunti
+4. Cerca nel RAG                  ricerca ibrida sui documenti indicizzati
+5. Chiama il modello              in loop, finché chiede strumenti
+6. Salva la risposta              con token e chiamate agli strumenti
+7. Riassumi se serve              in background, senza far attendere
 ```
 
-## Deployment
+## Requisiti
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+- **Node 24** (`.nvmrc` incluso: `nvm use`). Con Node 20 lo scaffolding di NestJS 12 non parte.
+- **Docker**, per Postgres.
+- Una **API key Anthropic** da [console.anthropic.com](https://console.anthropic.com) — non
+  l'abbonamento a Claude, che è un portafoglio separato.
+- Facoltativa: una **API key Voyage** da [voyageai.com](https://dash.voyageai.com) per il RAG
+  (200 milioni di token gratuiti). Senza, tutto il resto funziona con `RAG_ENABLED=false`.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+## Avvio
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+nvm use
+npm install
+cp .env.example .env          # e riempi ANTHROPIC_API_KEY
+
+npm run db:up                 # Postgres su :5433
+npm run db:migrate
+npm run rag:ingest            # indicizza codice e documentazione (serve VOYAGE_API_KEY)
+
+npm run start:dev             # API su :3000
+cd web && npm install && npm run dev   # interfaccia su :5173
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## Comandi
 
-## Observability
+| Comando | Cosa fa |
+| --- | --- |
+| `npm run start:dev` | API in watch mode |
+| `npm test` | Test unitari: nessuna dipendenza esterna, nessun costo |
+| `npm run test:db` | Test di integrazione contro Postgres reale |
+| `npm run rag:ingest` | Indicizza il progetto (incrementale: salta i file invariati) |
+| `npm run db:psql` | Shell psql sul database |
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
+## API
 
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
+| Metodo | Rotta | |
+| --- | --- | --- |
+| `POST` | `/chat` | Un turno di conversazione |
+| `POST` | `/chat/stream` | Lo stesso, in streaming SSE |
+| `GET` | `/chat/meta` | Strumenti disponibili e stato dell'indice |
+| `GET` | `/chat/:id/messages` | Lo storico grezzo: ispeziona la memoria |
+| `GET` | `/chat/:id/tools` | Cosa ha eseguito l'agente, con esito e durata |
+| `GET` | `/chat/:id/stats` | Token, cache e costo stimato |
 
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
+## Test
 
-## Resources
+**98 unitari** e **16 di integrazione**. Due scelte che li rendono utili:
 
-Check out a few resources that may come in handy when working with NestJS:
+- I test unitari sostituiscono LLM e database con dei finti: girano in mezzo secondo e non
+  costano un centesimo.
+- I test di integrazione usano **vettori sintetici** invece di embedding veri. La distanza
+  coseno la calcola Postgres e non gli importa da dove vengano i numeri, quindi tutto il SQL
+  vettoriale è verificabile senza chiamare nessuna API.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observer](https://observer.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+Il type-check non guarda dentro le stringhe SQL: è il motivo per cui `npm run test:db` esiste.
 
-## Support
+## Sicurezza
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+L'agente esegue comandi sulla macchina, quindi:
 
-## Stay in touch
+- **Nessuna shell.** `execFile` con gli argomenti in un array: `x; rm -rf ~` resta una stringa,
+  non diventa due comandi. Stesso principio dei parametri `$1` nelle query SQL.
+- **Whitelist** dei comandi eseguibili, non blacklist.
+- **Ambiente ridotto** a `PATH` e `HOME`: i comandi dell'agente non possono leggere le API key.
+- **Gli argomenti dal modello sono input non fidato**: percorsi assoluti e risalite con `..`
+  vengono rifiutati, e l'angolo del servo è limitato a 0-180 gradi perché è un vincolo fisico.
+- Nel frontend il Markdown è reso come nodi React, mai come HTML: l'output di un modello può
+  contenere `<script>`.
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+## Stato
 
-## License
+Fasi 1-3 (memoria, RAG, agente) complete e verificate con API reali. Fase 4 (streaming e
+interfaccia) funzionante in locale; restano il deploy e la modalità kiosk sul Raspberry.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Il percorso completo — decisioni prese, misure raccolte e trappole incontrate, comprese quelle
+in cui la teoria di partenza si è rivelata invecchiata — è in **[roadmap.md](roadmap.md)**.
+
+---
+
+Progetto personale di apprendimento. Il codice è commentato in italiano, spiegando *perché* una
+cosa è fatta così e non cosa fa la riga.
