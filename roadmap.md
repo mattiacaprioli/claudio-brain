@@ -1067,6 +1067,21 @@ minuti, con la maggior parte delle richieste che trasportava poche centinaia di 
 → Scansione di tutti i file senza rete, poi *una* chiamata con tutti i chunk, poi scrittura per
 file riassegnando i vettori per offset.
 
+**La dipendenza che in locale non serve dichiarare, perché la risolve il monorepo.** La build su
+Vercel è fallita al primo tentativo con `Cannot find name 'process'` in `vite.config.ts`, un file
+che in locale compilava da sempre. Nessuno dei due comportamenti è un caso: TypeScript risolve i
+tipi risalendo le cartelle, e in locale trovava `@types/node` nel `node_modules` della RADICE del
+progetto — dove sta perché lo usa il backend. Su Vercel la Root Directory è `web`: sopra non c'è
+più niente, e la dipendenza implicita svanisce. È la stessa famiglia del "funziona sulla mia
+macchina", con l'aggravante che la macchina qui è la struttura delle cartelle. → `@types/node`
+dichiarato nelle dipendenze di `web`, e i due tsconfig separati (`tsconfig.app.json` per il
+browser, `tsconfig.node.json` per la configurazione) così i tipi di Node stanno solo dove
+servono: un `process.env` in un componente ora è un errore di compilazione — verificato
+scrivendone uno apposta — invece di un guasto a runtime a pagina aperta.
+
+Il modo per accorgersene senza aspettare il deploy: **copiare `web/` fuori dal progetto,
+installare e compilare lì**. Riproduce esattamente ciò che vede Vercel, e costa venti secondi.
+
 **Un `.map()` a livello di modulo impedisce il tree-shaking, e la promessa nel commento era
 falsa.** Il ramo della demo doveva sparire dal bundle del kiosk: il commento lo dichiarava, la
 misura diceva il contrario — le registrazioni erano lì. Due cause in fila, e nessuna dà errore.

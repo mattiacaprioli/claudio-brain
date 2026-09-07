@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    // Il codice che gira NEL BROWSER: `vite/client` (per `import.meta.env`) e
+    // basta. In particolare NON i tipi di Node — così scrivere `process.env` in
+    // un componente è un errore di compilazione invece di un guasto a runtime
+    // che si scopre a pagina aperta.
+    "types": ["vite/client"],
+    "resolveJsonModule": true
+  },
+  "include": ["src"]
+}

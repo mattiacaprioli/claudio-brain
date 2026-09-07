@@ -1,21 +1,13 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "noUnusedLocals": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "isolatedModules": true,
-    "verbatimModuleSyntax": true,
-    // I tipi di Vite: senza, `import.meta.env` non esiste per TypeScript e la
-    // modalità demo non compila. Portano anche `resolveJsonModule`, che serve
-    // a importare le registrazioni.
-    "types": ["vite/client"],
-    "resolveJsonModule": true
-  },
-  "include": ["src", "vite.config.ts"]
+  // Due progetti invece di uno, ed è il pattern standard di Vite per una
+  // ragione concreta: in questa cartella convivono due ambienti diversi. `src`
+  // gira nel browser (DOM, niente Node), `vite.config.ts` gira in Node (niente
+  // DOM). Un tsconfig solo costringerebbe a dare a entrambi i tipi di
+  // entrambi — e sarebbe il modo per non accorgersi mai di un `process.env`
+  // finito in un componente.
+  //
+  // `tsc -b` compila i due progetti referenziati; questo file non ha sorgenti
+  // suoi, e `files: []` glielo dice.
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
 }

@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    // La configurazione di Vite gira in Node, non nel browser: qui `process`
+    // esiste davvero, e i tipi vanno dichiarati dove servono.
+    "types": ["node"]
+  },
+  "include": ["vite.config.ts"]
+}
