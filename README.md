@@ -12,17 +12,17 @@ ricerca ibrida li ha trovati, quale comando ha eseguito e in quanti millisecondi
 sono arrivati dalla cache. In quasi tutte le interfacce conversazionali la macchina è nascosta;
 qui è il soggetto.
 
-```
-tu   Il Postgres del progetto è su? E muovi il servo a 45 gradi.
+![L'interfaccia di Claudio: nella colonna di sinistra i frammenti di codice trovati dalla ricerca
+ibrida e i due strumenti eseguiti con le loro durate; a destra la risposta, che dichiara di aver
+solo simulato il comando al servomotore](docs/interfaccia-scura.webp)
 
-     ▪▪ roadmap.md:15-29                 Sì: claudio-brain-db (pgvector/pgvector:pg17)
-     ▪▪ src/rag/rag.repository.ts:44     è up da 6 ore, healthy, su 0.0.0.0:5433.
-     esegue get_docker_status  74 ms
-     esegue trigger_hardware…   0 ms     Il servo non si è mosso: la chiamata è stata
-                                         SIMULATA perché il Raspberry non è configurato.
+<details>
+<summary>La stessa schermata in tema chiaro</summary>
 
-                                         290 token generati · 6251 letti da cache · 2 giri
-```
+![La stessa conversazione nella palette chiara: fondo grigio freddo, stesso colore-segnale teal
+per la strumentazione](docs/interfaccia-chiara.webp)
+
+</details>
 
 ---
 
@@ -121,7 +121,7 @@ cd web && npm install && npm run dev   # interfaccia su :5173
 
 ## Test
 
-**98 unitari** e **16 di integrazione**. Due scelte che li rendono utili:
+**105 unitari** e **16 di integrazione**. Due scelte che li rendono utili:
 
 - I test unitari sostituiscono LLM e database con dei finti: girano in mezzo secondo e non
   costano un centesimo.
@@ -146,8 +146,10 @@ L'agente esegue comandi sulla macchina, quindi:
 
 ## Stato
 
-Fasi 1-3 (memoria, RAG, agente) complete e verificate con API reali. Fase 4 (streaming e
-interfaccia) funzionante in locale; restano il deploy e la modalità kiosk sul Raspberry.
+Fasi 1-3 (memoria, RAG, agente) complete e verificate con API reali. Fase 4 completa: streaming,
+interfaccia, avatar reattivo, immagine Docker `amd64`/`arm64` e
+[vetrina online](https://claudio-brain.vercel.app). Resta da provare la modalità kiosk su un
+Raspberry vero — e da collegare un servomotore che si muova davvero.
 
 Il percorso completo — decisioni prese, misure raccolte e trappole incontrate, comprese quelle
 in cui la teoria di partenza si è rivelata invecchiata — è in **[roadmap.md](roadmap.md)**.
