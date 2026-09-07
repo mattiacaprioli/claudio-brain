@@ -40,6 +40,9 @@ porta darebbero `EADDRINUSE`.
 
 ## La vetrina su Vercel (demo registrata)
 
+> **Online**: <https://claudio-brain.vercel.app> — dal 7 settembre 2026, `Root Directory: web`.
+> Ogni push su `main` ripubblica.
+
 La vetrina non ha un backend, e non è una limitazione da nascondere: i tool eseguono comandi
 sulla macchina, in cloud non avrebbero nulla da ispezionare, e un link pubblico brucerebbe la API
 key a chiunque passi. Quindi la pagina **riproduce eventi veri**, catturati da conversazioni

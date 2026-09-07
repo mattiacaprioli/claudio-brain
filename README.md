@@ -1,5 +1,8 @@
 # Claudio
 
+**[Provalo →](https://claudio-brain.vercel.app)** — demo che riproduce eventi *veri*, catturati
+da conversazioni reali: il backend vive sul robot e non è esposto su internet.
+
 Un assistente IA che legge il mio codice, ispeziona il mio ambiente di sviluppo e comanda
 l'hardware di un robot. Costruito da zero — senza LangChain, senza ORM, senza framework di
 orchestrazione — per capire davvero come funzionano gli agenti IA invece di assemblarli.

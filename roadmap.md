@@ -19,7 +19,7 @@ le parti della teoria di partenza che si sono rivelate invecchiate.
 | **1. API LLM, System Prompt, Memoria** | ✅ **Completata e verificata** | `POST /chat` con storico su Postgres, buffer + summary memory, prompt caching |
 | **2. RAG ed Embeddings** | ✅ **Completata e verificata** | Ricerca ibrida (vettori + full-text) su codice, note e doc hardware con `pgvector` |
 | **3. Function Calling e Agenti** | ✅ **Completata e verificata** | Tool Use nativo per comandi di sistema, Git, Docker ed estensioni hardware |
-| **4. Streaming, UI React & Hardware** | 🔧 **Interfaccia chiusa, deploy aperto** | Streaming SSE, UI React e avatar reattivo fatti e verificati; resta il deploy (Vercel + kiosk) |
+| **4. Streaming, UI React & Hardware** | ✅ **Completata**, tranne il kiosk su hardware | Streaming SSE, UI React, avatar reattivo, immagine multi-arch e **[vetrina online](https://claudio-brain.vercel.app)** |
 
 **Verificato dal vero il 4 settembre 2026** con API key reali (Anthropic + Voyage): memoria
 conversazionale, prompt caching, ingestion di 154 chunk e ricerca ibrida funzionanti.
@@ -751,8 +751,8 @@ Lavoro in ordine:
    origine): due righe che tengono aperta la strada del frontend separato senza rifattorizzare.
 3. ✅ **Dockerfile multi-stage + `buildx` arm64** (fatto il 5 settembre, sotto). Il kiosk è
    scritto ma **non ancora provato su un Raspberry vero**.
-4. ✅ **Modalità replay** per Vercel (fatta il 5 settembre, sotto). Resta il deploy vero e
-   proprio: collegare il repository a Vercel con `Root Directory: web`.
+4. ✅ **Modalità replay** per Vercel (fatta il 5 settembre, sotto) e **online dal 7 settembre**:
+   <https://claudio-brain.vercel.app>.
 5. **Vercel AI SDK**: valutato dopo, ora che il protocollo lo conosciamo a fondo. Gli eventi
    `tool_start`/`tool_end` sono nostri e andrebbero mappati sul suo formato.
 
@@ -891,6 +891,18 @@ possibile in una pagina fatta di eventi veri.
 | Bundle del kiosk | ✅ **nessuna traccia** delle registrazioni (370 KB contro 380) |
 | Modalità normale col backend vero | ✅ invariata: nessun bollino, streaming reale funzionante |
 | Console del browser | ✅ nessun errore |
+
+#### In produzione (7 settembre 2026)
+
+Online su <https://claudio-brain.vercel.app> con `Root Directory: web`. Verificato dal vivo:
+home 200, **deep link inesistente 200 con la pagina** (la rewrite di `vercel.json` fa lì il
+lavoro che in casa fa il filtro del backend), console pulita, 117 KB di JavaScript compresso per
+visita.
+
+Unico scarto rispetto al kiosk: Vercel serve gli asset con `max-age=0, must-revalidate` invece
+dell'`immutable` che mette il backend. Funziona (i file hanno l'hash nel nome, e la CDN
+risponde), ma costa una rivalidazione per file ad ogni visita: si sistema con una regola
+`headers` in `vercel.json`, se un domani conta.
 
 ---
 
